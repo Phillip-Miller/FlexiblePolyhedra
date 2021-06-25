@@ -8,28 +8,33 @@ using UnityEditor;
  * @Author Phillip MIller
  * @Date 6/21/2021
  */
-struct Edge
+class Edge 
 {
     public Vector3 vertex1;
     public Vector3 vertex2;
-    
-    public Edge(Vector3 vertex1, Vector3 vertex2)
-    {
+    public GameObject go;
+    public double length;
+    public Edge(Vector3 vertex1, Vector3 vertex2, GameObject go)
+    {   
+        this.go = go;
         this.vertex1 = vertex1;
         this.vertex2 = vertex2;
+        this.length = (vertex1 - vertex2).magnitude;
     }
 }
-struct Triangle
+class Triangle : IEnumerable<Edge> 
 {
     public Edge edge1;
     public Edge edge2;
     public Edge edge3;
     public double Area;
-    public Triangle(Vector3 vertex1, Vector3 vertex2, Vector3 vertex3)
+    
+    public Triangle(Vector3 vertex1, Vector3 vertex2, Vector3 vertex3,GameObject go)
     {
-        this.edge1 = new Edge(vertex1, vertex2);
-        this.edge2 = new Edge(vertex2, vertex3);
-        this.edge3 = new Edge(vertex3, vertex1);
+        
+        this.edge1 = new Edge(vertex1, vertex2,go);
+        this.edge2 = new Edge(vertex2, vertex3,go);
+        this.edge3 = new Edge(vertex3, vertex1,go);
         this.Area = Vector3.Cross(vertex2-vertex1, vertex3-vertex1).magnitude / 2 ; 
     }
     public Triangle(Edge edge1, Edge edge2, Edge edge3)
@@ -37,21 +42,30 @@ struct Triangle
         this.edge1 = edge1;
         this.edge2 = edge2;
         this.edge3 = edge3;
-        this.Area = Vector3.Cross(edge1.vertex1, edge1.vertex2).magnitude /2;
+        this.Area = Vector3.Cross(edge2.vertex1 - edge1.vertex1, edge3.vertex1 - edge1.vertex1).magnitude /2;
+    }
+    public IEnumerator<Edge> GetEnumerator()
+    {
+        yield return edge1;
+        yield return edge2;
+        yield return edge3;
+    }
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
     }
 }
 
 public class HingeJointCreator : MonoBehaviour
 { 
     ArrayList allAngles = new ArrayList(); 
-    public GameObject parentModel; //will show up public --link the parent and unpack it if still a prefab
-    public int numModelFaces; //the number of go's under the parentModel
+    public GameObject parentModel; //link the parent and unpack it if still a prefab
+    public int numGameObjects; //the number of go's under the parentModel TODO: change parentModel.transform.childCount; 
     public bool useGravity;
     public bool recolour;
-    int hingeTolerance;
+    public int hingeTolerance; //TODO: could calculate this as something to do with the width of the shapes imported
     void Start()
     {
-
         GameObject[] allGameObj = findAllGameObj(); //find and curate list -- working
         configureGameObjs(allGameObj);//color,ridgid,kinematics
         Vector3 inside = CalculateInside(allGameObj);
@@ -65,9 +79,9 @@ public class HingeJointCreator : MonoBehaviour
     /// <summary>
     ///Returns a list of all game objects under the parented object <parentModel> (parent object not included)
     /// </summary>
-    GameObject[] findAllGameObj() //TODO: change type later to something like arraylist
+    GameObject[] findAllGameObj()
     {
-        GameObject[] gameObjectArray = new GameObject[numModelFaces];
+        GameObject[] gameObjectArray = new GameObject[numGameObjects];
         
         for (int i = 0; i < parentModel.transform.childCount; i++)
         {
@@ -79,7 +93,7 @@ public class HingeJointCreator : MonoBehaviour
     /// <summary>
     /// applies ridgid body, enables is kinematic,applys random colors 
     /// </summary>
-    /// <param name="allGameObjects"> Boolean if the game Objects in prefabs are to be unpacked </param>
+    /// <param name="allGameObjects"> allGameObject to be configured </param>
     void configureGameObjs(GameObject[] allGameObjects) //TODO: have an assigned list that way colors dont get reused
     {
         bool first = true; //we want the first one to be kinematic such that it stays in place (equivalent of grounding in fusion360)
@@ -102,15 +116,29 @@ public class HingeJointCreator : MonoBehaviour
 
     Vector3 CalculateInside(GameObject[] allGameObjects)
     {
-        Vector3 position; float avgX = 0; float avgY = 0; float avgZ = 0;
-        //Calculate middle of each piece
-        for (int i = 0; i < numModelFaces; i++)
+         float avgX = 0; float avgY = 0; float avgZ = 0;
+        
+        for (int i = 0; i < numGameObjects; i++)
         {
-           
-            position = allGameObjects[i].transform.position; //TODO: make sure positions inside the fusion360 are marked correctly
-            avgX += position.x / numModelFaces;
-            avgY += position.y / numModelFaces;
-            avgZ += position.z / numModelFaces;
+            Vector3 position = Vector3.zero;
+            Mesh mesh = allGameObjects[i].GetComponent<MeshFilter>().mesh;
+            Vector3[] localVertices = mesh.vertices;
+            Vector3[] worldVertices = new Vector3[localVertices.Length];
+
+            int k = 0;
+            foreach (Vector3 vert in localVertices)
+            {
+                worldVertices[k] = allGameObjects[i].transform.TransformPoint(vert);
+                position.x += worldVertices[k].x / localVertices.Length;
+                position.y += worldVertices[k].y / localVertices.Length;
+                position.z += worldVertices[k].z / localVertices.Length;
+                k++;
+            }
+
+            //position = allGameObjects[i].transform.position; //TODO: make sure positions inside the fusion360 are marked correctly @QUESTION
+            avgX += position.x / numGameObjects;
+            avgY += position.y / numGameObjects;
+            avgZ += position.z / numGameObjects;
         }
         //Calculate Middle of shape
         Vector3 middle = new Vector3(avgX,avgY,avgZ);
@@ -118,44 +146,42 @@ public class HingeJointCreator : MonoBehaviour
         return middle;
     }
     
-    List<Triangle> FindEdges(GameObject[] allGameObj, Vector3 inside) 
+    List<Triangle> FindEdges(GameObject[] allGameObjects, Vector3 inside) 
     {
         Mesh mesh;
-        var modelFacesTriangles = new List<List<Triangle>>();
         var insideFacesTriangles = new List<Triangle>();
-        for (int i = 0; i < numModelFaces; i++)
+        for (int i = 0; i < numGameObjects; i++)
         {
-            mesh = allGameObj[i].GetComponent<MeshFilter>().mesh;
+            mesh = allGameObjects[i].GetComponent<MeshFilter>().mesh;
             Vector3 [] localVertices = mesh.vertices;
             Vector3 [] worldVertices = new Vector3[localVertices.Length];
             
             int k = 0;
             foreach (Vector3 vert in localVertices)
             {
-                worldVertices[k] = allGameObj[i].transform.TransformPoint(vert); //@FIXME had to add which game object was doing the transform
+                worldVertices[k] = allGameObjects[i].transform.TransformPoint(vert);
                 k++;
             }
 
-            int[] triangles = mesh.GetTriangles(0); //@FIXME what is a submesh
+            int[] triangles = mesh.GetTriangles(0); 
             List<Triangle> triangleStructs = new List<Triangle>();
             
             for (int j = 0; j < triangles.Length-3; j+=3)
             {
-                triangleStructs.Add(new Triangle(worldVertices[triangles[j]], worldVertices[triangles[j+1]], worldVertices[triangles[j+2]]));
+                triangleStructs.Add(new Triangle(worldVertices[triangles[j]], worldVertices[triangles[j+1]], worldVertices[triangles[j+2]],allGameObjects[i]));
             }
             Triangle bottomFace = findFace(triangleStructs,inside);
             insideFacesTriangles.Add(bottomFace);
 
-            //modelFacesTriangles.Add(triangleStructs);
         }
-       
-            foreach (Triangle tri in insideFacesTriangles)
-            {
-                Debug.DrawLine(tri.edge1.vertex1, tri.edge1.vertex2, Color.red, 100f);
-                Debug.DrawLine(tri.edge2.vertex1, tri.edge2.vertex2, Color.red, 100f);
-                Debug.DrawLine(tri.edge3.vertex1, tri.edge3.vertex2, Color.red, 100f);
-            }
-        
+
+        //foreach (Triangle tri in insideFacesTriangles)
+        //{
+        //    Debug.DrawLine(tri.edge1.vertex1, tri.edge1.vertex2, Color.red, 100f);
+        //    Debug.DrawLine(tri.edge2.vertex1, tri.edge2.vertex2, Color.red, 100f);
+        //    Debug.DrawLine(tri.edge3.vertex1, tri.edge3.vertex2, Color.red, 100f);
+        //}
+
         return insideFacesTriangles;
     }
 
@@ -193,7 +219,7 @@ public class HingeJointCreator : MonoBehaviour
     }
     void CreateHingeJoints(GameObject[] allGameObjects, List<Triangle> edges)
     {
-        print("CREATING HINGE JOINTS:" + edges.Count);
+        List<Edge[]> matchingEdges = findMatchingEdges(edges);//{[pair1,pair1],[pair2,pair2]}
         GameObject go = allGameObjects[0];
         var hinge = go.AddComponent<HingeJoint>();
 
@@ -206,9 +232,32 @@ public class HingeJointCreator : MonoBehaviour
     /// Finds matching edges using global hingeTolerance, and finding edges that match in length
     /// </summary>
     /// <param name="innerFaces"> List of Triangles that are facing the inside </param>
-    void findMatchingEdges(List<Triangle> innerFaces)
+    List<Edge[]> findMatchingEdges(List<Triangle> innerFaces)
     {
+        var returnList = new List<Edge[]>(); //TODO: check for duplicates
+        //beauitufl code
+        for (int i = 0; i < innerFaces.Count; i++)//pick a shape
+        {
+            for (int j = i + 1; j < innerFaces.Count; j++)//check other shapes
+            {
+                foreach (Edge edge1 in innerFaces[i])
+                {
+                    foreach(Edge edge2 in innerFaces[j])
+                    {
+                        //TODO: Only checks the start and end verticies might need to change to check all verticies to fix issues vertex match mismatched typically
+                        if((((edge1.vertex1 - edge2.vertex1).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex2).magnitude < hingeTolerance) ||
+                            ((edge1.vertex1 - edge2.vertex2).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex1).magnitude < hingeTolerance)) && edge1.length - edge2.length < 1)
+                        {
+                            Debug.DrawLine(edge1.vertex1, edge1.vertex2, Color.red, 100f);
+                            Debug.DrawLine(edge2.vertex1, edge2.vertex2, Color.red, 100f);
+                            returnList.Add(new Edge[] { edge1, edge2 });
+                        }
+                    }
+                }
 
+            }
+        }
+        return returnList;
     }
     void CreateLabels()
     {
