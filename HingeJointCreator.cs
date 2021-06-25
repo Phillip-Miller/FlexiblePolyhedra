@@ -8,7 +8,7 @@ using UnityEditor;
  * @Author Phillip MIller
  * @Date 6/21/2021
  */
-class Edge 
+class Edge //vertex should be a world vertex
 {
     public Vector3 vertex1;
     public Vector3 vertex2;
@@ -44,6 +44,7 @@ class Triangle : IEnumerable<Edge>
         this.edge3 = edge3;
         this.Area = Vector3.Cross(edge2.vertex1 - edge1.vertex1, edge3.vertex1 - edge1.vertex1).magnitude /2;
     }
+    
     public IEnumerator<Edge> GetEnumerator()
     {
         yield return edge1;
@@ -58,14 +59,16 @@ class Triangle : IEnumerable<Edge>
 
 public class HingeJointCreator : MonoBehaviour
 { 
-    ArrayList allAngles = new ArrayList(); 
+    List<HingeJoint> uniqueHinges = new List<HingeJoint>(); 
     public GameObject parentModel; //link the parent and unpack it if still a prefab
-    public int numGameObjects; //the number of go's under the parentModel TODO: change parentModel.transform.childCount; 
     public bool useGravity;
     public bool recolour;
     public int hingeTolerance; //TODO: could calculate this as something to do with the width of the shapes imported
+    public bool run;
     void Start()
     {
+        if (!run)
+            return;
         GameObject[] allGameObj = findAllGameObj(); //find and curate list -- working
         configureGameObjs(allGameObj);//color,ridgid,kinematics
         Vector3 inside = CalculateInside(allGameObj);
@@ -76,12 +79,20 @@ public class HingeJointCreator : MonoBehaviour
 
 
     }
+    void Update()
+    {
+        //foreach (HingeJoint hinge in uniqueHinges)
+        //{
+        //    print(hinge.angle);
+        //}
+
+    }
     /// <summary>
     ///Returns a list of all game objects under the parented object <parentModel> (parent object not included)
     /// </summary>
     GameObject[] findAllGameObj()
     {
-        GameObject[] gameObjectArray = new GameObject[numGameObjects];
+        GameObject[] gameObjectArray = new GameObject[parentModel.transform.childCount];
         
         for (int i = 0; i < parentModel.transform.childCount; i++)
         {
@@ -116,9 +127,9 @@ public class HingeJointCreator : MonoBehaviour
 
     Vector3 CalculateInside(GameObject[] allGameObjects)
     {
-         float avgX = 0; float avgY = 0; float avgZ = 0;
+        float avgX = 0; float avgY = 0; float avgZ = 0;
         
-        for (int i = 0; i < numGameObjects; i++)
+        for (int i = 0; i < parentModel.transform.childCount; i++)
         {
             Vector3 position = Vector3.zero;
             Mesh mesh = allGameObjects[i].GetComponent<MeshFilter>().mesh;
@@ -136,9 +147,9 @@ public class HingeJointCreator : MonoBehaviour
             }
 
             //position = allGameObjects[i].transform.position; //TODO: make sure positions inside the fusion360 are marked correctly @QUESTION
-            avgX += position.x / numGameObjects;
-            avgY += position.y / numGameObjects;
-            avgZ += position.z / numGameObjects;
+            avgX += position.x / parentModel.transform.childCount;
+            avgY += position.y / parentModel.transform.childCount;
+            avgZ += position.z / parentModel.transform.childCount;
         }
         //Calculate Middle of shape
         Vector3 middle = new Vector3(avgX,avgY,avgZ);
@@ -150,7 +161,7 @@ public class HingeJointCreator : MonoBehaviour
     {
         Mesh mesh;
         var insideFacesTriangles = new List<Triangle>();
-        for (int i = 0; i < numGameObjects; i++)
+        for (int i = 0; i < parentModel.transform.childCount; i++)
         {
             mesh = allGameObjects[i].GetComponent<MeshFilter>().mesh;
             Vector3 [] localVertices = mesh.vertices;
@@ -174,14 +185,12 @@ public class HingeJointCreator : MonoBehaviour
             insideFacesTriangles.Add(bottomFace);
 
         }
-
         //foreach (Triangle tri in insideFacesTriangles)
         //{
         //    Debug.DrawLine(tri.edge1.vertex1, tri.edge1.vertex2, Color.red, 100f);
         //    Debug.DrawLine(tri.edge2.vertex1, tri.edge2.vertex2, Color.red, 100f);
         //    Debug.DrawLine(tri.edge3.vertex1, tri.edge3.vertex2, Color.red, 100f);
         //}
-
         return insideFacesTriangles;
     }
 
@@ -217,15 +226,24 @@ public class HingeJointCreator : MonoBehaviour
         }
         return triangleStructs[maxIndex1];
     }
-    void CreateHingeJoints(GameObject[] allGameObjects, List<Triangle> edges)
+    void CreateHingeJoints(GameObject[] allGameObjects, List<Triangle> triangles)
     {
-        List<Edge[]> matchingEdges = findMatchingEdges(edges);//{[pair1,pair1],[pair2,pair2]}
-        GameObject go = allGameObjects[0];
-        var hinge = go.AddComponent<HingeJoint>();
 
-        hinge.anchor = new Vector3(0, 0, 0); // this needs to be the bottem edge of the SAME shape (defined in local space)
-        hinge.axis = new Vector3(0, 0, 0); //again for the same shape this is defined in local space
-        return;
+        List<Edge[]> matchingEdges = findMatchingEdges(triangles);//{[pair1,pair1],[pair2,pair2]}
+        foreach(Edge[] entry in matchingEdges)
+        {  //probably need to make hinge work both directions
+            var hinge1 = entry[0].go.AddComponent<HingeJoint>();
+            hinge1.anchor = entry[0].go.transform.InverseTransformPoint((entry[0].vertex1 + entry[0].vertex2) / 2); // this needs to be the bottem edge of the SAME shape (defined in local space)
+            hinge1.axis = (entry[0].vertex1 - entry[0].vertex2); //@FIXME this appears to be a world entry not local
+            hinge1.connectedBody = entry[1].go.GetComponent<Rigidbody>();
+
+            var hinge2 = entry[1].go.AddComponent<HingeJoint>();
+            hinge2.anchor = entry[1].go.transform.InverseTransformPoint((entry[1].vertex1 + entry[1].vertex2 )/2); // this needs to be the bottem edge of the SAME shape (defined in local space)
+            hinge2.axis = (entry[1].vertex1 - entry[1].vertex2); //@FIXME this appears to be a world entry not local
+            hinge2.connectedBody = entry[0].go.GetComponent<Rigidbody>();
+
+            uniqueHinges.Add(hinge1);
+        }
     }
 
     /// <summary>
@@ -264,9 +282,5 @@ public class HingeJointCreator : MonoBehaviour
         return;
     }
     // Update is called once per frame
-    void Update()
-    {
-
-        
-    }
+    
 }
