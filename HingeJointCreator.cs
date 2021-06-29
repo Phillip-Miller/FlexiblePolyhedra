@@ -15,36 +15,56 @@ class Edge //vertex should be a world vertex
     public GameObject go;
     public double length;
     public Edge(Vector3 vertex1, Vector3 vertex2, GameObject go)
-    {   
+    {
         this.go = go;
         this.vertex1 = vertex1;
         this.vertex2 = vertex2;
         this.length = (vertex1 - vertex2).magnitude;
     }
+
+    public override bool Equals(object obj)
+    {
+        Edge other = (Edge)obj;
+        if (other.vertex1.Equals(vertex1) && other.vertex2.Equals(vertex2))
+            return true;
+        if (other.vertex1.Equals(vertex2) && other.vertex2.Equals(vertex1))
+            return true;
+        return false;
+    }
+    //if they have one vertex in common
+    public bool isConnected(Edge other)
+    {
+        return (vertex1.Equals(other.vertex1) || vertex1.Equals(other.vertex2) || vertex2.Equals(other.vertex1) || vertex2.Equals(other.vertex2));
+    }
+
+    public override string ToString()
+    {
+        return base.ToString();
+    }
 }
-class Triangle : IEnumerable<Edge> 
+class Triangle : IEnumerable<Edge>
 {
     public Edge edge1;
     public Edge edge2;
     public Edge edge3;
     public double Area;
-    
-    public Triangle(Vector3 vertex1, Vector3 vertex2, Vector3 vertex3,GameObject go)
+
+    public Triangle(Vector3 vertex1, Vector3 vertex2, Vector3 vertex3, GameObject go)
     {
-        
-        this.edge1 = new Edge(vertex1, vertex2,go);
-        this.edge2 = new Edge(vertex2, vertex3,go);
-        this.edge3 = new Edge(vertex3, vertex1,go);
-        this.Area = Vector3.Cross(vertex2-vertex1, vertex3-vertex1).magnitude / 2 ; 
+
+        this.edge1 = new Edge(vertex1, vertex2, go);
+        this.edge2 = new Edge(vertex2, vertex3, go);
+        this.edge3 = new Edge(vertex3, vertex1, go);
+        this.Area = Vector3.Cross(vertex2 - vertex1, vertex3 - vertex1).magnitude / 2;
     }
     public Triangle(Edge edge1, Edge edge2, Edge edge3)
     {
         this.edge1 = edge1;
         this.edge2 = edge2;
         this.edge3 = edge3;
-        this.Area = Vector3.Cross(edge2.vertex1 - edge1.vertex1, edge3.vertex1 - edge1.vertex1).magnitude /2;
+        this.Area = Vector3.Cross(edge2.vertex1 - edge1.vertex1, edge3.vertex1 - edge1.vertex1).magnitude / 2;
     }
-    
+
     public IEnumerator<Edge> GetEnumerator()
     {
         yield return edge1;
@@ -57,14 +77,15 @@ class Triangle : IEnumerable<Edge>
     }
 }
 
-public class HingeJointCreator : MonoBehaviour
-{ 
-    List<HingeJoint> uniqueHinges = new List<HingeJoint>(); 
+public class MyScript : MonoBehaviour
+{
+    List<HingeJoint> uniqueHinges = new List<HingeJoint>();
     public GameObject parentModel; //link the parent and unpack it if still a prefab
     public bool useGravity;
     public bool recolour;
-    public int hingeTolerance; //TODO: could calculate this as something to do with the width of the shapes imported
+    public double hingeTolerance; //TODO: could calculate this as something to do with the width of the shapes imported
     public bool run;
+    public double sideArea;
     void Start()
     {
         if (!run)
@@ -73,7 +94,7 @@ public class HingeJointCreator : MonoBehaviour
         configureGameObjs(allGameObj);//color,ridgid,kinematics
         Vector3 inside = CalculateInside(allGameObj);
         var myEdges = FindEdges(allGameObj, inside);
-        CreateHingeJoints(allGameObj,myEdges);
+        CreateHingeJoints(allGameObj, myEdges);
         CreateLabels(); //Label Angles, Shapes, and Have an array of angles thats updated each frame
         //TODO: save these presents that were made in the scene so they become permanete after the scene is exited
 
@@ -81,10 +102,11 @@ public class HingeJointCreator : MonoBehaviour
     }
     void Update()
     {
+       // print(uniqueHinges.Count);
         //foreach (HingeJoint hinge in uniqueHinges)
         //{
         //    print(hinge.angle);
-        //}
+        //} //check bounds for collisions,write out all the angles
 
     }
     /// <summary>
@@ -93,13 +115,13 @@ public class HingeJointCreator : MonoBehaviour
     GameObject[] findAllGameObj()
     {
         GameObject[] gameObjectArray = new GameObject[parentModel.transform.childCount];
-        
+
         for (int i = 0; i < parentModel.transform.childCount; i++)
         {
             GameObject child = parentModel.transform.GetChild(i).gameObject;
             gameObjectArray[i] = child;
         }
-        return gameObjectArray; 
+        return gameObjectArray;
     }
     /// <summary>
     /// applies ridgid body, enables is kinematic,applys random colors 
@@ -109,7 +131,7 @@ public class HingeJointCreator : MonoBehaviour
     {
         bool first = true; //we want the first one to be kinematic such that it stays in place (equivalent of grounding in fusion360)
 
-        foreach(GameObject go in allGameObjects) 
+        foreach (GameObject go in allGameObjects)
         {
 
             Rigidbody rb = go.AddComponent<Rigidbody>(); //TODO: make sure none of them have rigid bodies first
@@ -128,7 +150,7 @@ public class HingeJointCreator : MonoBehaviour
     Vector3 CalculateInside(GameObject[] allGameObjects)
     {
         float avgX = 0; float avgY = 0; float avgZ = 0;
-        
+
         for (int i = 0; i < parentModel.transform.childCount; i++)
         {
             Vector3 position = Vector3.zero;
@@ -152,53 +174,126 @@ public class HingeJointCreator : MonoBehaviour
             avgZ += position.z / parentModel.transform.childCount;
         }
         //Calculate Middle of shape
-        Vector3 middle = new Vector3(avgX,avgY,avgZ);
-        print("Middle of shape"+middle);
+        Vector3 middle = new Vector3(avgX, avgY, avgZ);
+        print("Middle of shape" + middle);
         return middle;
     }
-    
-    List<Triangle> FindEdges(GameObject[] allGameObjects, Vector3 inside) 
+    //probably just want to rework to solve for unshared edges and then do some n! method of linking them back up
+    List<Triangle> FindEdges(GameObject[] allGameObjects, Vector3 inside)
     {
         Mesh mesh;
         var insideFacesTriangles = new List<Triangle>();
         for (int i = 0; i < parentModel.transform.childCount; i++)
         {
             mesh = allGameObjects[i].GetComponent<MeshFilter>().mesh;
-            Vector3 [] localVertices = mesh.vertices;
-            Vector3 [] worldVertices = new Vector3[localVertices.Length];
-            
+            Vector3[] localVertices = mesh.vertices;
+            Vector3[] worldVertices = new Vector3[localVertices.Length];
+
             int k = 0;
             foreach (Vector3 vert in localVertices)
             {
                 worldVertices[k] = allGameObjects[i].transform.TransformPoint(vert);
                 k++;
             }
+            //filled up world vertices for each game object
 
-            int[] triangles = mesh.GetTriangles(0); 
+            int[] triangles = mesh.GetTriangles(0);
             List<Triangle> triangleStructs = new List<Triangle>();
-            
-            for (int j = 0; j < triangles.Length-3; j+=3)
+
+            for (int j = 0; j < triangles.Length - 2; j += 3) //@FIXME changed -3 to minus 2
             {
-                triangleStructs.Add(new Triangle(worldVertices[triangles[j]], worldVertices[triangles[j+1]], worldVertices[triangles[j+2]],allGameObjects[i]));
+                triangleStructs.Add(new Triangle(worldVertices[triangles[j]], worldVertices[triangles[j + 1]], worldVertices[triangles[j + 2]], allGameObjects[i]));
             }
-            Triangle bottomFace = findFace(triangleStructs,inside);
+            //created class structs with triangle list given by getTriangles()
+
+            //additional triangle fix
+            List<Edge> allEdges = findOutsideEdges(triangleStructs);
+            List<Triangle> realTriangles = findConnectedEdges(allEdges);
+            //foreach (Triangle tri in realTriangles)
+            //{
+            //    Debug.DrawLine(tri.edge1.vertex1, tri.edge1.vertex2, Color.red, 100f);
+            //    Debug.DrawLine(tri.edge2.vertex1, tri.edge2.vertex2, Color.red, 100f);
+            //    Debug.DrawLine(tri.edge3.vertex1, tri.edge3.vertex2, Color.red, 100f);
+            //}
+            //used to be triangle structs
+            Triangle bottomFace = findInsideFace(realTriangles, inside);
             insideFacesTriangles.Add(bottomFace);
 
         }
-        //foreach (Triangle tri in insideFacesTriangles)
-        //{
-        //    Debug.DrawLine(tri.edge1.vertex1, tri.edge1.vertex2, Color.red, 100f);
-        //    Debug.DrawLine(tri.edge2.vertex1, tri.edge2.vertex2, Color.red, 100f);
-        //    Debug.DrawLine(tri.edge3.vertex1, tri.edge3.vertex2, Color.red, 100f);
-        //}
+        
+
         return insideFacesTriangles;
     }
+    List<Edge> findOutsideEdges(List<Triangle> triangleStructs)
+    {
+        List<Edge> allEdges = new List<Edge>();
+        //I am going to iterate through every single edge and find which edge is unique
 
-    Triangle findFace(List<Triangle >triangleStructs,Vector3 inside) //@FIXME
+        for (int i = 0; i < triangleStructs.Count; i++) //List of all edges
+        {
+            if (triangleStructs[i].Area < sideArea) //get rid of the side edges
+            {
+                continue;
+            }
+            foreach (Edge e in triangleStructs[i])
+            {
+                allEdges.Add(e);
+            }
+        }
+        for (int j = 0; j < allEdges.Count; j++) //make the list unique @FIXME probably better way but hashset requires ovveriding getHashCode method
+        {
+            Edge findMatch = allEdges[j];
+            for (int k = j + 1; k < allEdges.Count; k++)
+            {
+                if (findMatch.Equals(allEdges[k]))
+                {
+                    print("removing edge");
+                    allEdges.Remove(findMatch);
+                }
+            }
+        }
+        foreach (Edge edge in allEdges)
+        {
+            Debug.DrawLine(edge.vertex1, edge.vertex2, Color.red, 100f);
+        }
+        print("Alledges.count: " + allEdges.Count);
+        return allEdges;
+
+    }
+
+    //need to iterate through all the edges and remake my triangle objects from scratch by seeing if they have a connected vertex
+    List<Triangle> findConnectedEdges(List<Edge> allEdges)
+    {
+        var finalizedTriangles = new List<Triangle>();
+        for(int i = 0; i<allEdges.Count; i++)
+        {
+            Edge a = allEdges[i];
+            Edge b = null;
+            Edge c = null;
+            bool first = true;
+
+            for (int j = i + 1; j < allEdges.Count; j++) 
+            {
+                if (first && a.isConnected(allEdges[j])){
+                    b = allEdges[j];
+                    first = false;
+                    continue;
+                }
+                else if (a.isConnected(allEdges[j])){
+                    c = allEdges[j];
+                    finalizedTriangles.Add(new Triangle(a, b, c));
+                    break;
+                }
+                allEdges.Remove(a);allEdges.Remove(b);allEdges.Remove(c);
+            }
+        }
+        return finalizedTriangles;
+    }
+    Triangle findInsideFace(List<Triangle> triangleStructs, Vector3 inside) //@FIXME
     {
         double max = 0;
-        int maxIndex1=0;
-        int maxIndex2=0;
+        int maxIndex1 = 0;
+        int maxIndex2 = 0;
         for (int i = 0; i < triangleStructs.Count; i++)
         {
             if (triangleStructs[i].Area > max)
@@ -213,7 +308,7 @@ public class HingeJointCreator : MonoBehaviour
         }
 
         //If this causes errors switch to Max cross product normal idea
-        double index1AvgDistance = (triangleStructs[maxIndex1].edge1.vertex1 - inside).magnitude /3;
+        double index1AvgDistance = (triangleStructs[maxIndex1].edge1.vertex1 - inside).magnitude / 3;
         double index2AvgDistance = (triangleStructs[maxIndex2].edge1.vertex1 - inside).magnitude / 3;
         index1AvgDistance += (triangleStructs[maxIndex1].edge2.vertex1 - inside).magnitude / 3;
         index2AvgDistance += (triangleStructs[maxIndex2].edge2.vertex1 - inside).magnitude / 3;
@@ -230,17 +325,12 @@ public class HingeJointCreator : MonoBehaviour
     {
 
         List<Edge[]> matchingEdges = findMatchingEdges(triangles);//{[pair1,pair1],[pair2,pair2]}
-        foreach(Edge[] entry in matchingEdges)
-        {  //probably need to make hinge work both directions
+        foreach (Edge[] entry in matchingEdges)
+        {  //only need one hinge per pair
             var hinge1 = entry[0].go.AddComponent<HingeJoint>();
             hinge1.anchor = entry[0].go.transform.InverseTransformPoint((entry[0].vertex1 + entry[0].vertex2) / 2); // this needs to be the bottem edge of the SAME shape (defined in local space)
             hinge1.axis = (entry[0].vertex1 - entry[0].vertex2); //@FIXME this appears to be a world entry not local
             hinge1.connectedBody = entry[1].go.GetComponent<Rigidbody>();
-
-            var hinge2 = entry[1].go.AddComponent<HingeJoint>();
-            hinge2.anchor = entry[1].go.transform.InverseTransformPoint((entry[1].vertex1 + entry[1].vertex2 )/2); // this needs to be the bottem edge of the SAME shape (defined in local space)
-            hinge2.axis = (entry[1].vertex1 - entry[1].vertex2); //@FIXME this appears to be a world entry not local
-            hinge2.connectedBody = entry[0].go.GetComponent<Rigidbody>();
 
             uniqueHinges.Add(hinge1);
         }
@@ -260,14 +350,13 @@ public class HingeJointCreator : MonoBehaviour
             {
                 foreach (Edge edge1 in innerFaces[i])
                 {
-                    foreach(Edge edge2 in innerFaces[j])
+                    foreach (Edge edge2 in innerFaces[j])
                     {
                         //TODO: Only checks the start and end verticies might need to change to check all verticies to fix issues vertex match mismatched typically
-                        if((((edge1.vertex1 - edge2.vertex1).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex2).magnitude < hingeTolerance) ||
+                        if ((((edge1.vertex1 - edge2.vertex1).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex2).magnitude < hingeTolerance) ||
                             ((edge1.vertex1 - edge2.vertex2).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex1).magnitude < hingeTolerance)) && edge1.length - edge2.length < 1)
                         {
-                            Debug.DrawLine(edge1.vertex1, edge1.vertex2, Color.red, 100f);
-                            Debug.DrawLine(edge2.vertex1, edge2.vertex2, Color.red, 100f);
+                            //Debug.DrawLine(edge1.vertex1, edge1.vertex2, Color.red,100f);
                             returnList.Add(new Edge[] { edge1, edge2 });
                         }
                     }
@@ -282,5 +371,5 @@ public class HingeJointCreator : MonoBehaviour
         return;
     }
     // Update is called once per frame
-    
+
 }
