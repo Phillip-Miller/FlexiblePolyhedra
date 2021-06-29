@@ -31,6 +31,15 @@ class Edge //vertex should be a world vertex
             return true;
         return false;
     }
+
+    public override int GetHashCode() //no idea if this works
+    {
+        int hashCode = -1704521559;
+        hashCode = hashCode + -1521134295 * vertex1.GetHashCode();
+        hashCode = hashCode + -1521134295 * vertex2.GetHashCode();
+        return hashCode;
+    }
+
     //if they have one vertex in common
     public bool isConnected(Edge other)
     {
@@ -200,22 +209,20 @@ public class MyScript : MonoBehaviour
             int[] triangles = mesh.GetTriangles(0);
             List<Triangle> triangleStructs = new List<Triangle>();
 
-            for (int j = 0; j < triangles.Length - 2; j += 3) //@FIXME changed -3 to minus 2
+            for (int j = 0; j < triangles.Length-2; j += 3) 
             {
                 triangleStructs.Add(new Triangle(worldVertices[triangles[j]], worldVertices[triangles[j + 1]], worldVertices[triangles[j + 2]], allGameObjects[i]));
             }
-            //created class structs with triangle list given by getTriangles()
 
             //additional triangle fix
             List<Edge> allEdges = findOutsideEdges(triangleStructs);
             List<Triangle> realTriangles = findConnectedEdges(allEdges);
-            //foreach (Triangle tri in realTriangles)
-            //{
-            //    Debug.DrawLine(tri.edge1.vertex1, tri.edge1.vertex2, Color.red, 100f);
-            //    Debug.DrawLine(tri.edge2.vertex1, tri.edge2.vertex2, Color.red, 100f);
-            //    Debug.DrawLine(tri.edge3.vertex1, tri.edge3.vertex2, Color.red, 100f);
-            //}
-            //used to be triangle structs
+            foreach (Triangle tri in realTriangles)
+            {
+                Debug.DrawLine(tri.edge1.vertex1, tri.edge1.vertex2, Color.red, 10f);
+                Debug.DrawLine(tri.edge2.vertex1, tri.edge2.vertex2, Color.red, 10f);
+                Debug.DrawLine(tri.edge3.vertex1, tri.edge3.vertex2, Color.red, 10f);
+            }
             Triangle bottomFace = findInsideFace(realTriangles, inside);
             insideFacesTriangles.Add(bottomFace);
 
@@ -240,23 +247,20 @@ public class MyScript : MonoBehaviour
                 allEdges.Add(e);
             }
         }
-        for (int j = 0; j < allEdges.Count; j++) //make the list unique @FIXME probably better way but hashset requires ovveriding getHashCode method
+        for (int j = 0; j < allEdges.Count; j++) //if a duplicate exists, remove both as they are interior triangles
         {
             Edge findMatch = allEdges[j];
             for (int k = j + 1; k < allEdges.Count; k++)
             {
                 if (findMatch.Equals(allEdges[k]))
                 {
-                    print("removing edge");
-                    allEdges.Remove(findMatch);
+                    while (allEdges.Contains(findMatch))
+                        allEdges.Remove(findMatch);
+                    j--;
+                    break;
                 }
             }
         }
-        foreach (Edge edge in allEdges)
-        {
-            Debug.DrawLine(edge.vertex1, edge.vertex2, Color.red, 100f);
-        }
-        print("Alledges.count: " + allEdges.Count);
         return allEdges;
 
     }
@@ -264,15 +268,16 @@ public class MyScript : MonoBehaviour
     //need to iterate through all the edges and remake my triangle objects from scratch by seeing if they have a connected vertex
     List<Triangle> findConnectedEdges(List<Edge> allEdges)
     {
+        print(allEdges.Count);
         var finalizedTriangles = new List<Triangle>();
-        for(int i = 0; i<allEdges.Count; i++)
+        while(allEdges.Count !=0)
         {
-            Edge a = allEdges[i];
+            Edge a = allEdges[0];
             Edge b = null;
             Edge c = null;
             bool first = true;
 
-            for (int j = i + 1; j < allEdges.Count; j++) 
+            for (int j = 1; j < allEdges.Count; j++) 
             {
                 if (first && a.isConnected(allEdges[j])){
                     b = allEdges[j];
@@ -282,11 +287,12 @@ public class MyScript : MonoBehaviour
                 else if (a.isConnected(allEdges[j])){
                     c = allEdges[j];
                     finalizedTriangles.Add(new Triangle(a, b, c));
+                    allEdges.Remove(a); allEdges.Remove(b); allEdges.Remove(c);
                     break;
                 }
-                allEdges.Remove(a);allEdges.Remove(b);allEdges.Remove(c);
             }
         }
+        print(allEdges.Count);
         return finalizedTriangles;
     }
     Triangle findInsideFace(List<Triangle> triangleStructs, Vector3 inside) //@FIXME
