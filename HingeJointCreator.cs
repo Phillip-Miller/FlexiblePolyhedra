@@ -8,6 +8,8 @@ using UnityEditor;
  * @Author Phillip MIller
  * @Date 6/21/2021
  */
+
+//inside faces triangles is not working I should instead just see which one is closest to joint
 class Edge //vertex should be a world vertex
 {
     public Vector3 vertex1;
@@ -53,6 +55,7 @@ class Edge //vertex should be a world vertex
 }
 class Triangle : IEnumerable<Edge>
 {
+
     public Edge edge1;
     public Edge edge2;
     public Edge edge3;
@@ -84,38 +87,55 @@ class Triangle : IEnumerable<Edge>
     {
         return GetEnumerator();
     }
+    public void Draw()
+    {
+        Debug.DrawLine(this.edge1.vertex1, this.edge1.vertex2, Color.red, 10f);
+        Debug.DrawLine(this.edge2.vertex1, this.edge2.vertex2, Color.red, 10f);
+        Debug.DrawLine(this.edge3.vertex1, this.edge3.vertex2, Color.red, 10f);
+    }
 }
 
 public class MyScript : MonoBehaviour
 {
     List<HingeJoint> uniqueHinges = new List<HingeJoint>();
-    public GameObject parentModel; //link the parent and unpack it if still a prefab
-    public bool useGravity;
+    public GameObject parentModel; //On run: link the parent and unpack it if still a prefab
+    public bool useGravity; //false by default
     public bool recolour;
     public double hingeTolerance; //TODO: could calculate this as something to do with the width of the shapes imported
     public bool run;
     public double sideArea;
+    public bool enableColliders; //TODO: make custom colliders just on the inside face of the shape and space out the hinges slightly
     void Start()
     {
         if (!run)
             return;
         GameObject[] allGameObj = findAllGameObj(); //find and curate list -- working
-        configureGameObjs(allGameObj);//color,ridgid,kinematics
-        Vector3 inside = CalculateInside(allGameObj);
-        var myEdges = FindEdges(allGameObj, inside);
-        CreateHingeJoints(allGameObj, myEdges);
-        CreateLabels(); //Label Angles, Shapes, and Have an array of angles thats updated each frame
-        //TODO: save these presents that were made in the scene so they become permanete after the scene is exited
+        configureGameObjs(allGameObj);//color,ridgid,kinematics,collider
+        Vector3 inside = CalculateInside(allGameObj);//average insides
+        var myEdges = FindEdges(allGameObj, inside);//finds all outside edges of shape using shared edges and area methods
+        CreateHingeJoints(allGameObj, myEdges); //creates hinge joints
+        CreateLabels(); //Label Angles, Shapes, and Have an array of angles thats updated each frame @TODO:
 
+        for (int i = 0; i < allGameObj.Length; i++)
+        {
+            for (int j = i + 1; j < allGameObj.Length; j++)
+            {
+                Physics.IgnoreCollision(allGameObj[i].GetComponent<MeshCollider>(), allGameObj[j].GetComponent<MeshCollider>(), true);
 
+            }
+        }
     }
     void Update()
     {
-       // print(uniqueHinges.Count);
+        
+       
+        
+        // print(uniqueHinges.Count);
         //foreach (HingeJoint hinge in uniqueHinges)
         //{
         //    print(hinge.angle);
         //} //check bounds for collisions,write out all the angles
+        //print(calculate volume)
 
     }
     /// <summary>
@@ -142,12 +162,26 @@ public class MyScript : MonoBehaviour
 
         foreach (GameObject go in allGameObjects)
         {
-
-            Rigidbody rb = go.AddComponent<Rigidbody>(); //TODO: make sure none of them have rigid bodies first
+            Rigidbody rb = go.GetComponent<Rigidbody>();
+            if (rb == null)
+                rb = go.AddComponent<Rigidbody>();
             rb.useGravity = useGravity;
-            rb.isKinematic = first; //ground the first one
-            first = false;
+            rb.isKinematic = first; //ground the first one @FIXME
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
 
+            if (enableColliders)  
+            {
+                MeshCollider c = go.GetComponent<MeshCollider>();
+                if (c == null)
+                {
+                    c = go.AddComponent<MeshCollider>();
+                    c.convex = true;
+                }
+                
+            }
+            first = false;
+            
             if (recolour)
             {
                 var colorChange = go.GetComponent<Renderer>(); //randomizing the color attached to get easy to view multicolor faces
@@ -184,14 +218,12 @@ public class MyScript : MonoBehaviour
         }
         //Calculate Middle of shape
         Vector3 middle = new Vector3(avgX, avgY, avgZ);
-        print("Middle of shape" + middle);
         return middle;
     }
-    //probably just want to rework to solve for unshared edges and then do some n! method of linking them back up
     List<Triangle> FindEdges(GameObject[] allGameObjects, Vector3 inside)
     {
         Mesh mesh;
-        var insideFacesTriangles = new List<Triangle>();
+        var allRealTriangles = new List<Triangle>();
         for (int i = 0; i < parentModel.transform.childCount; i++)
         {
             mesh = allGameObjects[i].GetComponent<MeshFilter>().mesh;
@@ -209,30 +241,26 @@ public class MyScript : MonoBehaviour
             int[] triangles = mesh.GetTriangles(0);
             List<Triangle> triangleStructs = new List<Triangle>();
 
-            for (int j = 0; j < triangles.Length-2; j += 3) 
+            for (int j = 0; j < triangles.Length - 2; j += 3)
             {
                 triangleStructs.Add(new Triangle(worldVertices[triangles[j]], worldVertices[triangles[j + 1]], worldVertices[triangles[j + 2]], allGameObjects[i]));
             }
 
             //additional triangle fix
             List<Edge> allEdges = findOutsideEdges(triangleStructs);
-            List<Triangle> realTriangles = findConnectedEdges(allEdges);
+            List<Triangle> realTriangles = findConnectedEdges(allEdges); //@FIXME polymorphism
+
+            //Triangle bottomFace = findInsideFace(realTriangles, inside);
             foreach (Triangle tri in realTriangles)
             {
-                Debug.DrawLine(tri.edge1.vertex1, tri.edge1.vertex2, Color.red, 10f);
-                Debug.DrawLine(tri.edge2.vertex1, tri.edge2.vertex2, Color.red, 10f);
-                Debug.DrawLine(tri.edge3.vertex1, tri.edge3.vertex2, Color.red, 10f);
+                allRealTriangles.Add(tri);
             }
-            Triangle bottomFace = findInsideFace(realTriangles, inside);
-            insideFacesTriangles.Add(bottomFace);
 
         }
-        
-
-        return insideFacesTriangles;
+        return allRealTriangles;
     }
     List<Edge> findOutsideEdges(List<Triangle> triangleStructs)
-    {
+    { 
         List<Edge> allEdges = new List<Edge>();
         //I am going to iterate through every single edge and find which edge is unique
 
@@ -268,7 +296,7 @@ public class MyScript : MonoBehaviour
     //need to iterate through all the edges and remake my triangle objects from scratch by seeing if they have a connected vertex
     List<Triangle> findConnectedEdges(List<Edge> allEdges)
     {
-        print(allEdges.Count);
+        //@FIXME TRIANGLE FLAG
         var finalizedTriangles = new List<Triangle>();
         while(allEdges.Count !=0)
         {
@@ -292,26 +320,29 @@ public class MyScript : MonoBehaviour
                 }
             }
         }
-        print(allEdges.Count);
+        
         return finalizedTriangles;
     }
+    /// <summary>
+    /// Do not use. Instead calculate closest edge 
+    /// </summary>
     Triangle findInsideFace(List<Triangle> triangleStructs, Vector3 inside) //@FIXME
     {
         double max = 0;
         int maxIndex1 = 0;
-        int maxIndex2 = 0;
-        for (int i = 0; i < triangleStructs.Count; i++)
-        {
-            if (triangleStructs[i].Area > max)
-            {
-                max = triangleStructs[i].Area;
-                maxIndex1 = i;
-            }
-            else if (Math.Abs(triangleStructs[i].Area - max) < 8)
-            {
-                maxIndex2 = i;
-            }
-        }
+        int maxIndex2 = 1;
+        //for (int i = 0; i < triangleStructs.Count; i++)
+        //{
+        //    if (triangleStructs[i].Area > max)
+        //    {
+        //        max = triangleStructs[i].Area;
+        //        maxIndex1 = i;
+        //    }
+        //    else if (Math.Abs(triangleStructs[i].Area - max) < 8)
+        //    {
+        //        maxIndex2 = i;
+        //    }
+        //}
 
         //If this causes errors switch to Max cross product normal idea
         double index1AvgDistance = (triangleStructs[maxIndex1].edge1.vertex1 - inside).magnitude / 3;
@@ -329,40 +360,40 @@ public class MyScript : MonoBehaviour
     }
     void CreateHingeJoints(GameObject[] allGameObjects, List<Triangle> triangles)
     {
-
+        
         List<Edge[]> matchingEdges = findMatchingEdges(triangles);//{[pair1,pair1],[pair2,pair2]}
+        print(matchingEdges.Count);
         foreach (Edge[] entry in matchingEdges)
         {  //only need one hinge per pair
-            var hinge1 = entry[0].go.AddComponent<HingeJoint>();
-            hinge1.anchor = entry[0].go.transform.InverseTransformPoint((entry[0].vertex1 + entry[0].vertex2) / 2); // this needs to be the bottem edge of the SAME shape (defined in local space)
-            hinge1.axis = (entry[0].vertex1 - entry[0].vertex2); //@FIXME this appears to be a world entry not local
-            hinge1.connectedBody = entry[1].go.GetComponent<Rigidbody>();
-
-            uniqueHinges.Add(hinge1);
+            var hinge = entry[0].go.AddComponent<HingeJoint>();
+            GameObject go = entry[0].go;
+            hinge.anchor = entry[0].go.transform.InverseTransformPoint((entry[0].vertex1 + entry[0].vertex2) / 2); 
+            hinge.axis = go.transform.InverseTransformPoint(entry[0].vertex1) - go.transform.InverseTransformPoint(entry[0].vertex2); 
+            hinge.connectedBody = entry[1].go.GetComponent<Rigidbody>();
+            hinge.enableCollision = true;
+            //Physics.IgnoreCollision(entry[0].go.GetComponent<MeshCollider>(), entry[1].go.GetComponent<MeshCollider>(),true); @FIXME
+            uniqueHinges.Add(hinge);
         }
     }
 
     /// <summary>
     /// Finds matching edges using global hingeTolerance, and finding edges that match in length
     /// </summary>
-    /// <param name="innerFaces"> List of Triangles that are facing the inside </param>
-    List<Edge[]> findMatchingEdges(List<Triangle> innerFaces)
+    /// <param name="allRealTriangles"> List of Triangles that are facing the inside </param>
+    List<Edge[]> findMatchingEdges(List<Triangle> allRealTriangles)
     {
-        var returnList = new List<Edge[]>(); //TODO: check for duplicates
-        //beauitufl code
-        for (int i = 0; i < innerFaces.Count; i++)//pick a shape
+        var returnList = new List<Edge[]>(); 
+        for (int i = 0; i < allRealTriangles.Count; i++)//pick a shape
         {
-            for (int j = i + 1; j < innerFaces.Count; j++)//check other shapes
+            for (int j = i + 1; j < allRealTriangles.Count; j++)//check other shapes
             {
-                foreach (Edge edge1 in innerFaces[i])
+                foreach (Edge edge1 in allRealTriangles[i])
                 {
-                    foreach (Edge edge2 in innerFaces[j])
+                    foreach (Edge edge2 in allRealTriangles[j])
                     {
-                        //TODO: Only checks the start and end verticies might need to change to check all verticies to fix issues vertex match mismatched typically
                         if ((((edge1.vertex1 - edge2.vertex1).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex2).magnitude < hingeTolerance) ||
                             ((edge1.vertex1 - edge2.vertex2).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex1).magnitude < hingeTolerance)) && edge1.length - edge2.length < 1)
                         {
-                            //Debug.DrawLine(edge1.vertex1, edge1.vertex2, Color.red,100f);
                             returnList.Add(new Edge[] { edge1, edge2 });
                         }
                     }
@@ -371,6 +402,10 @@ public class MyScript : MonoBehaviour
             }
         }
         return returnList;
+    }
+    double CalculateArea(List<Triangle> faces)
+    {
+        return 0.0;
     }
     void CreateLabels()
     {
