@@ -55,19 +55,19 @@ class Edge //vertex should be a world vertex
 }
 class Triangle : IEnumerable<Edge>
 {
-
     public Edge edge1;
     public Edge edge2;
     public Edge edge3;
     public double Area;
+    public Vector3 Normal;
 
     public Triangle(Vector3 vertex1, Vector3 vertex2, Vector3 vertex3, GameObject go)
     {
-
         this.edge1 = new Edge(vertex1, vertex2, go);
         this.edge2 = new Edge(vertex2, vertex3, go);
         this.edge3 = new Edge(vertex3, vertex1, go);
         this.Area = Vector3.Cross(vertex2 - vertex1, vertex3 - vertex1).magnitude / 2;
+        this.Normal = GetNormal();
     }
     public Triangle(Edge edge1, Edge edge2, Edge edge3)
     {
@@ -75,6 +75,13 @@ class Triangle : IEnumerable<Edge>
         this.edge2 = edge2;
         this.edge3 = edge3;
         this.Area = Vector3.Cross(edge2.vertex1 - edge1.vertex1, edge3.vertex1 - edge1.vertex1).magnitude / 2;
+        this.Normal = GetNormal();
+    }
+    private Vector3 GetNormal()
+    {
+        Vector3 side1 = edge2.vertex1 - edge1.vertex1;
+        Vector3 side2 = edge3.vertex1 - edge1.vertex1;
+        return Vector3.Cross(side1, side2);
     }
 
     public IEnumerator<Edge> GetEnumerator()
@@ -94,6 +101,56 @@ class Triangle : IEnumerable<Edge>
         Debug.DrawLine(this.edge3.vertex1, this.edge3.vertex2, Color.red, 10f);
     }
 }
+class Polygon : IEnumerable
+{
+    public List<Edge> EdgeList = new List<Edge>();
+    public List<Triangle> TriangleList = new List<Triangle>();
+   
+
+    public Polygon(List<Triangle> triangles)
+    {
+        this.TriangleList = triangles;
+    }
+    public Polygon()
+    {
+
+    }
+    /// <summary>
+    /// Create triangles from one vertex picked at random
+    /// </summary>
+    private void createTriangles()
+    {
+
+    }
+    public Vector3 getNormal()
+    {
+        if (this.TriangleList == null)
+            createTriangles();
+        return this.TriangleList[0].Normal;
+    } 
+    public double getArea()
+    {
+        if (this.TriangleList == null)
+            createTriangles();
+        double area = 0;
+        foreach (Triangle tri in TriangleList)
+        {
+            area += tri.Area;
+        }
+        return area;
+    }
+    public IEnumerator GetEnumerator()
+    {
+        return EdgeList.GetEnumerator();
+    }
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
+}
+
+
+
 
 public class MyScript : MonoBehaviour
 {
@@ -111,7 +168,7 @@ public class MyScript : MonoBehaviour
             return;
         GameObject[] allGameObj = findAllGameObj(); //find and curate list -- working
         configureGameObjs(allGameObj);//color,ridgid,kinematics,collider
-        Vector3 inside = CalculateInside(allGameObj);//average insides
+        Vector3 inside = CalculateInside(allGameObj);//average insides -- extranous method
         var myEdges = FindEdges(allGameObj, inside);//finds all outside edges of shape using shared edges and area methods
         CreateHingeJoints(allGameObj, myEdges); //creates hinge joints
         CreateLabels(); //Label Angles, Shapes, and Have an array of angles thats updated each frame @TODO:
@@ -126,10 +183,7 @@ public class MyScript : MonoBehaviour
         }
     }
     void Update()
-    {
-        
-       
-        
+    { 
         // print(uniqueHinges.Count);
         //foreach (HingeJoint hinge in uniqueHinges)
         //{
@@ -220,57 +274,60 @@ public class MyScript : MonoBehaviour
         Vector3 middle = new Vector3(avgX, avgY, avgZ);
         return middle;
     }
-    List<Triangle> FindEdges(GameObject[] allGameObjects, Vector3 inside)
+    /// <summary>
+    /// Finds all the outside edges of a given face 2*ngon (front and back)
+    /// </summary>
+    /// <param name="allGameObjects"></param>
+    /// <param name="inside"></param>
+    /// <returns></returns>
+    List<Polygon> FindEdges(GameObject[] allGameObjects, Vector3 inside)
     {
         Mesh mesh;
-        var allRealTriangles = new List<Triangle>();
-        for (int i = 0; i < parentModel.transform.childCount; i++)
+        var facePolygons = new List<Polygon>();
+        for (int i = 0; i < parentModel.transform.childCount; i++) //foreach game object
         {
             mesh = allGameObjects[i].GetComponent<MeshFilter>().mesh;
             Vector3[] localVertices = mesh.vertices;
             Vector3[] worldVertices = new Vector3[localVertices.Length];
 
             int k = 0;
-            foreach (Vector3 vert in localVertices)
+            foreach (Vector3 vert in localVertices) //Convert all local verts to world verts
             {
                 worldVertices[k] = allGameObjects[i].transform.TransformPoint(vert);
                 k++;
             }
-            //filled up world vertices for each game object
+            
 
             int[] triangles = mesh.GetTriangles(0);
-            List<Triangle> triangleStructs = new List<Triangle>();
-
-            for (int j = 0; j < triangles.Length - 2; j += 3)
+            List<Triangle> worldTriangles = new List<Triangle>();
+            for (int j = 0; j < triangles.Length - 2; j += 3) //all triangles in world space
             {
-                triangleStructs.Add(new Triangle(worldVertices[triangles[j]], worldVertices[triangles[j + 1]], worldVertices[triangles[j + 2]], allGameObjects[i]));
+                worldTriangles.Add(new Triangle(worldVertices[triangles[j]], worldVertices[triangles[j + 1]], worldVertices[triangles[j + 2]], allGameObjects[i]));
             }
 
-            //additional triangle fix
-            List<Edge> allEdges = findOutsideEdges(triangleStructs);
-            List<Triangle> realTriangles = findConnectedEdges(allEdges); //@FIXME polymorphism
+            List<Edge> allEdges = findOutsideEdges(worldTriangles); //find all the edges of a shape
+            List<Polygon> realPolygons = findConnectedEdges(allEdges); //this list should always be of size two
 
-            //Triangle bottomFace = findInsideFace(realTriangles, inside);
-            foreach (Triangle tri in realTriangles)
+            foreach (Polygon poly in realPolygons) //@FIXME Polygon
             {
-                allRealTriangles.Add(tri);
+                facePolygons.Add(poly);
             }
 
         }
-        return allRealTriangles;
+        return facePolygons;
     }
-    List<Edge> findOutsideEdges(List<Triangle> triangleStructs)
+    List<Edge> findOutsideEdges(List<Triangle> worldTriangles)
     { 
         List<Edge> allEdges = new List<Edge>();
         //I am going to iterate through every single edge and find which edge is unique
 
-        for (int i = 0; i < triangleStructs.Count; i++) //List of all edges
+        for (int i = 0; i < worldTriangles.Count; i++) //List of all edges
         {
-            if (triangleStructs[i].Area < sideArea) //get rid of the side edges
+            if (worldTriangles[i].Area < sideArea) //get rid of the side edges
             {
                 continue;
             }
-            foreach (Edge e in triangleStructs[i])
+            foreach (Edge e in worldTriangles[i])
             {
                 allEdges.Add(e);
             }
@@ -290,88 +347,69 @@ public class MyScript : MonoBehaviour
             }
         }
         return allEdges;
-
     }
 
-    //need to iterate through all the edges and remake my triangle objects from scratch by seeing if they have a connected vertex
-    List<Triangle> findConnectedEdges(List<Edge> allEdges)
+    /// <summary>
+    /// Iterates through all the edges to create polygon objects from scratch by seeing if they have a connected vertex
+    /// </summary>
+    /// <param name="allEdges"></param>
+    /// <returns></returns>
+    List<Polygon> findConnectedEdges(List<Edge> allEdges)
     {
-        //@FIXME TRIANGLE FLAG
-        var finalizedTriangles = new List<Triangle>();
-        while(allEdges.Count !=0)
+        var finalizedPolygons = new List<Polygon>();
+        while(allEdges.Count !=0) 
         {
-            Edge a = allEdges[0];
-            Edge b = null;
-            Edge c = null;
-            bool first = true;
+            Polygon myPolygon = new Polygon();
+            myPolygon.EdgeList.Add(allEdges[0]);
 
-            for (int j = 1; j < allEdges.Count; j++) 
+            for (int j = 1; j < allEdges.Count; j++) //build up polygon
             {
-                if (first && a.isConnected(allEdges[j])){
-                    b = allEdges[j];
-                    first = false;
-                    continue;
-                }
-                else if (a.isConnected(allEdges[j])){
-                    c = allEdges[j];
-                    finalizedTriangles.Add(new Triangle(a, b, c));
-                    allEdges.Remove(a); allEdges.Remove(b); allEdges.Remove(c);
-                    break;
-                }
+                if (myPolygon.EdgeList[myPolygon.EdgeList.Count - 1].isConnected(allEdges[j]))
+                    myPolygon.EdgeList.Add(allEdges[j]);
             }
+            foreach (Edge edge in myPolygon)
+            {
+                allEdges.Remove(edge);
+            }
+            finalizedPolygons.Add(myPolygon);
         }
-        
-        return finalizedTriangles;
+        return finalizedPolygons;
     }
     /// <summary>
-    /// Do not use. Instead calculate closest edge 
+    /// Do not use
+    /// Calculates closest edge to middle out of 2 possible triangles
     /// </summary>
-    Triangle findInsideFace(List<Triangle> triangleStructs, Vector3 inside) //@FIXME
+    Triangle findInsideFace(List<Triangle> triangleStructs, Vector3 inside) 
     {
-        double max = 0;
-        int maxIndex1 = 0;
-        int maxIndex2 = 1;
-        //for (int i = 0; i < triangleStructs.Count; i++)
-        //{
-        //    if (triangleStructs[i].Area > max)
-        //    {
-        //        max = triangleStructs[i].Area;
-        //        maxIndex1 = i;
-        //    }
-        //    else if (Math.Abs(triangleStructs[i].Area - max) < 8)
-        //    {
-        //        maxIndex2 = i;
-        //    }
-        //}
-
-        //If this causes errors switch to Max cross product normal idea
-        double index1AvgDistance = (triangleStructs[maxIndex1].edge1.vertex1 - inside).magnitude / 3;
-        double index2AvgDistance = (triangleStructs[maxIndex2].edge1.vertex1 - inside).magnitude / 3;
-        index1AvgDistance += (triangleStructs[maxIndex1].edge2.vertex1 - inside).magnitude / 3;
-        index2AvgDistance += (triangleStructs[maxIndex2].edge2.vertex1 - inside).magnitude / 3;
-        index1AvgDistance += (triangleStructs[maxIndex1].edge3.vertex1 - inside).magnitude / 3;
-        index2AvgDistance += (triangleStructs[maxIndex2].edge3.vertex1 - inside).magnitude / 3;
+       
+        double index1AvgDistance = (triangleStructs[0].edge1.vertex1 - inside).magnitude / 3;
+        double index2AvgDistance = (triangleStructs[1].edge1.vertex1 - inside).magnitude / 3;
+        index1AvgDistance += (triangleStructs[0].edge2.vertex1 - inside).magnitude / 3;
+        index2AvgDistance += (triangleStructs[1].edge2.vertex1 - inside).magnitude / 3;
+        index1AvgDistance += (triangleStructs[0].edge3.vertex1 - inside).magnitude / 3;
+        index2AvgDistance += (triangleStructs[1].edge3.vertex1 - inside).magnitude / 3;
 
         if (index1AvgDistance > index2AvgDistance)
         {
-            return triangleStructs[maxIndex2];
+            return triangleStructs[1];
         }
-        return triangleStructs[maxIndex1];
+        return triangleStructs[0];
     }
-    void CreateHingeJoints(GameObject[] allGameObjects, List<Triangle> triangles)
+    void CreateHingeJoints(GameObject[] allGameObjects, List<Polygon> polygons)
     {
         
-        List<Edge[]> matchingEdges = findMatchingEdges(triangles);//{[pair1,pair1],[pair2,pair2]}
+        List<Edge[]> matchingEdges = findMatchingEdges(polygons);//{[pair1,pair1],[pair2,pair2]}
         print(matchingEdges.Count);
         foreach (Edge[] entry in matchingEdges)
-        {  //only need one hinge per pair
+        {  
+            
             var hinge = entry[0].go.AddComponent<HingeJoint>();
             GameObject go = entry[0].go;
             hinge.anchor = entry[0].go.transform.InverseTransformPoint((entry[0].vertex1 + entry[0].vertex2) / 2); 
             hinge.axis = go.transform.InverseTransformPoint(entry[0].vertex1) - go.transform.InverseTransformPoint(entry[0].vertex2); 
             hinge.connectedBody = entry[1].go.GetComponent<Rigidbody>();
             hinge.enableCollision = true;
-            //Physics.IgnoreCollision(entry[0].go.GetComponent<MeshCollider>(), entry[1].go.GetComponent<MeshCollider>(),true); @FIXME
+            //Physics.IgnoreCollision(entry[0].go.GetComponent<MeshCollider>(), entry[1].go.GetComponent<MeshCollider>(),true);
             uniqueHinges.Add(hinge);
         }
     }
@@ -379,21 +417,23 @@ public class MyScript : MonoBehaviour
     /// <summary>
     /// Finds matching edges using global hingeTolerance, and finding edges that match in length
     /// </summary>
-    /// <param name="allRealTriangles"> List of Triangles that are facing the inside </param>
-    List<Edge[]> findMatchingEdges(List<Triangle> allRealTriangles)
+    /// <param name="realPolygons"> List of finalized polygons (size 2) </param>
+    List<Edge[]> findMatchingEdges(List<Polygon> realPolygons) //@FIXME Polygon
     {
         var returnList = new List<Edge[]>(); 
-        for (int i = 0; i < allRealTriangles.Count; i++)//pick a shape
+        for (int i = 0; i < realPolygons.Count; i++)//pick a shape
         {
-            for (int j = i + 1; j < allRealTriangles.Count; j++)//check other shapes
+            for (int j = i + 1; j < realPolygons.Count; j++)//check other shapes
             {
-                foreach (Edge edge1 in allRealTriangles[i])
+                foreach (Edge edge1 in realPolygons[i])
                 {
-                    foreach (Edge edge2 in allRealTriangles[j])
+                    foreach (Edge edge2 in realPolygons[j])
                     {
                         if ((((edge1.vertex1 - edge2.vertex1).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex2).magnitude < hingeTolerance) ||
                             ((edge1.vertex1 - edge2.vertex2).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex1).magnitude < hingeTolerance)) && edge1.length - edge2.length < 1)
                         {
+                            //check if they share the same normal
+                            //if(edge1.go.No) @FIXME Check for normal
                             returnList.Add(new Edge[] { edge1, edge2 });
                         }
                     }
@@ -403,6 +443,7 @@ public class MyScript : MonoBehaviour
         }
         return returnList;
     }
+
     double CalculateArea(List<Triangle> faces)
     {
         return 0.0;
