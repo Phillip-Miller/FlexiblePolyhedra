@@ -6,7 +6,8 @@ using UnityEditor;
 using System.Linq;
 /* Need to have parented, no prefab, no rigid bodies, no other modifiers
  * Joints are picked based on how close together they are using the tolerance indicator
- * 
+ * swap collider planes child and parent hiearchy --child objects may be unkownly moving they should not move once instantiated
+ * might need to enable continous collision detection
  * @ROADMAP:
  * Removal of faces,edges,hinges
  * Display of angles
@@ -117,7 +118,7 @@ class Polygon : IEnumerable
     private List<Vector3> Vertices = new List<Vector3>(); 
     public List<Edge> EdgeList = new List<Edge>();
     private List<Triangle> TriangleList = new List<Triangle>();
-    
+    public Vector3 extrudeDirection;
 
     public Polygon(List<Triangle> triangles)
     {
@@ -198,32 +199,33 @@ public class MyScript : MonoBehaviour
     {
         if (!run)
             return;
-        GameObject[] allGameObj = findAllGameObj(); //find and curate list -- working
-        configureGameObjs(allGameObj);//color,ridgid,kinematics,collider
-        Vector3 inside = CalculateInside(allGameObj);//average insides -- extranous method
-        List<Polygon> myPolygons = FindEdges(allGameObj, inside);//finds all outside edges of shape using shared edges and area methods
-        List<Edge[]> matchingEdges = FindMatchingEdges(ref myPolygons);//{[pair1,pair1,],[pair2,pair2]}
+        GameObject[] allGameObj = findAllGameObj(); //find and curate list of all viewable faces
+        GameObject[] allColliderGameObjects = new GameObject[allGameObj.Length];
+        configureGameObjs(allGameObj,true);//just assigns colour
+        List<Polygon> myPolygons = FindEdges(allGameObj,false);//finds all outside edges of shape using shared edges and area methods
+        FindMatchingEdges(ref myPolygons); //edits ref myPolygons to just the inner polygons by finding the matching edges
+        CreateColliderPlanes(ref myPolygons); //Create my collider planes from the myPolygons and reassigns the game object attached to my polygon
+        
+        for (int i = 0; i < myPolygons.Count; i++)
+        {
+            allColliderGameObjects[i] = myPolygons[i].EdgeList[0].go;
+        }
+        configureGameObjs(allColliderGameObjects,false);
+
+        myPolygons = FindEdges(allColliderGameObjects,true); //@FIXME this is throwing the error myPolygons goes to 0
+        List<Edge[]> matchingEdges = FindMatchingEdges(ref myPolygons);
         CreateHingeJoints(matchingEdges); //creates hinge joints
-        CreateColliderPlanes(myPolygons);
+        
         CreateLabels(); //Label Angles, Shapes, and Have an array of angles thats updated each frame @TODO:
+        foreach (GameObject go in allGameObj)
+        {
+            go.SetActive(false);
+        }
 
-        //for (int i = 0; i < allGameObj.Length; i++)
-        //{
-        //    for (int j = i + 1; j < allGameObj.Length; j++)
-        //    {
-        //        Physics.IgnoreCollision(allGameObj[i].GetComponent<MeshCollider>(), allGameObj[j].GetComponent<MeshCollider>(), true);
-
-        //    }
-        //}
     }
     void Update()
     {
-        // print(uniqueHinges.Count);
-        //foreach (HingeJoint hinge in uniqueHinges)
-        //{
-        //    print(hinge.angle);
-        //} //check bounds for collisions,write out all the angles
-        //print(calculate volume)
+        
 
     }
     /// <summary>
@@ -244,33 +246,33 @@ public class MyScript : MonoBehaviour
     /// applies ridgid body, enables is kinematic,applys random colors 
     /// </summary>
     /// <param name="allGameObjects"> allGameObject to be configured </param>
-    void configureGameObjs(GameObject[] allGameObjects) //TODO: have an assigned list that way colors dont get reused
+    void configureGameObjs(GameObject[] allGameObjects,bool face) //TODO: have an assigned list that way colors dont get reused
     {
+        
         bool first = true; //we want the first one to be kinematic such that it stays in place (equivalent of grounding in fusion360)
 
         foreach (GameObject go in allGameObjects)
         {
-            Rigidbody rb = go.GetComponent<Rigidbody>();
-            if (rb == null)
-                rb = go.AddComponent<Rigidbody>();
-            rb.useGravity = useGravity;
-            rb.isKinematic = first; 
-            rb.velocity = Vector3.zero;
-            rb.angularVelocity = Vector3.zero;
-
-            if (enableColliders)
+            if (!face)
             {
-                MeshCollider c = go.GetComponent<MeshCollider>();
-                if (c == null)
+                Rigidbody rb = go.GetComponent<Rigidbody>();
+                rb.useGravity = useGravity;
+                rb.isKinematic = first;
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+                if(!first)
+                    rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                else
+                    rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+                if (enableColliders)
                 {
-                    c = go.AddComponent<MeshCollider>();
+                    MeshCollider c = go.GetComponent<MeshCollider>();
                     c.convex = true;
+                    c.enabled = true;
                 }
-
+                first = false;
             }
-            first = false;
-
-            if (recolour)
+            else if (recolour)
             {
                 var colorChange = go.GetComponent<Renderer>(); //randomizing the color attached to get easy to view multicolor faces
                 colorChange.material.SetColor("_Color", UnityEngine.Random.ColorHSV(0f, 1f, 1f, 1f, 0.5f, 1f));
@@ -311,32 +313,34 @@ public class MyScript : MonoBehaviour
     /// <summary>
     /// Finds all the outside edges of a given face 2*ngon (front and back)
     /// </summary>
-    /// <param name="allGameObjects"></param>
-    /// <param name="inside"></param>
+    /// <param name="GameObjects"></param>
+    /// <param name="collider"></param> Used to skip half the verticies on a two faced plane to aid in making hinges
     /// <returns></returns>
-    List<Polygon> FindEdges(GameObject[] allGameObjects, Vector3 inside)
+    List<Polygon> FindEdges(GameObject[] GameObjects,bool collider)
     {
         Mesh mesh;
         var facePolygons = new List<Polygon>();
-        for (int i = 0; i < parentModel.transform.childCount; i++) //foreach game object
+        for (int i = 0; i < GameObjects.Length; i++) //foreach game object
         {
-            mesh = allGameObjects[i].GetComponent<MeshFilter>().mesh;
+            mesh = GameObjects[i].GetComponent<MeshFilter>().mesh;
             Vector3[] localVertices = mesh.vertices;
             Vector3[] worldVertices = new Vector3[localVertices.Length];
 
             int k = 0;
             foreach (Vector3 vert in localVertices) //Convert all local verts to world verts
             {
-                worldVertices[k] = allGameObjects[i].transform.TransformPoint(vert);
+                worldVertices[k] = GameObjects[i].transform.TransformPoint(vert);
                 k++;
             }
-
-
+            
             int[] triangles = mesh.GetTriangles(0);
             List<Triangle> worldTriangles = new List<Triangle>();
-            for (int j = 0; j < triangles.Length - 2; j += 3) //all triangles in world space
+            int loopStop = triangles.Length;
+            if (collider)
+                loopStop /= 2;
+            for (int j = 0; j < loopStop - 2; j += 3) //all triangles in world space
             {
-                worldTriangles.Add(new Triangle(worldVertices[triangles[j]], worldVertices[triangles[j + 1]], worldVertices[triangles[j + 2]], allGameObjects[i]));
+                worldTriangles.Add(new Triangle(worldVertices[triangles[j]], worldVertices[triangles[j + 1]], worldVertices[triangles[j + 2]], GameObjects[i]));
             }
 
             List<Edge> allEdges = FindOutsideEdges(worldTriangles); //find all the edges of a shape
@@ -443,13 +447,12 @@ public class MyScript : MonoBehaviour
             hinge.axis = go.transform.InverseTransformPoint(entry[0].vertex1) - go.transform.InverseTransformPoint(entry[0].vertex2);
             hinge.connectedBody = entry[1].go.GetComponent<Rigidbody>();
             hinge.enableCollision = true;
-            //Physics.IgnoreCollision(entry[0].go.GetComponent<MeshCollider>(), entry[1].go.GetComponent<MeshCollider>(),true);
             uniqueHinges.Add(hinge);
         }
     }
 
     /// <summary>
-    /// Finds matching edges using global hingeTolerance, and finding edges that match in length
+    /// Finds matching edges using global hingeTolerance, and finding edges that match in length. This also determines which polygons are inward facing replacing the old findInside method.
     /// </summary>
     /// <param name="realPolygons"> List of finalized polygons (size 2) </param>
     List<Edge[]> FindMatchingEdges(ref List<Polygon> realPolygons) 
@@ -482,41 +485,69 @@ public class MyScript : MonoBehaviour
         return returnList;
     }
     /// <summary>
-    /// Creates planes, enables mesh colliders, links them to the parent object.
+    /// Creates planes, enables mesh colliders, sets them in the correct place, edits the myPolygons to refer to the collider now
     /// </summary>
     /// <param name="myPolygons"></param>
-    void CreateColliderPlanes(List<Polygon> myPolygons) // List<Edge> edges
-    {
+     void CreateColliderPlanes(ref List<Polygon> myPolygons) // List<Edge> edges
+     {
         foreach (Polygon p in myPolygons) {
             Vector3[] vertices = p.getVerticies().ToArray();
-            int[] triangles = createTriangleArray(p);
+            int[] triangles = CreateTriangleArray(p).ToArray();
 
-            GameObject go = new GameObject("Mesh", typeof(MeshFilter),typeof(MeshCollider),typeof(MeshRenderer));
-            go.transform.SetParent(p.EdgeList[0].go.transform);
-
+            GameObject colliderGo = new GameObject("Mesh", typeof(MeshFilter),typeof(MeshCollider),typeof(MeshRenderer),typeof(Rigidbody));
+            var newChild = p.EdgeList[0].go.transform;
+            //colliderGo.transform.SetParent(newChild);
             Mesh mesh = new Mesh();
-            go.GetComponent<MeshFilter>().mesh = mesh;
+            colliderGo.GetComponent<MeshFilter>().mesh = mesh;
+            colliderGo.GetComponent<MeshCollider>().sharedMesh = mesh;
             mesh.vertices = vertices;
             mesh.triangles = triangles;
-        }
-    }
 
-    int [] createTriangleArray(Polygon p) //@TODO: fix winding order if it matters unity is counter clockwise 
+            foreach(Edge e in p)
+            {
+                e.go = colliderGo;
+            }
+            
+            //colliderGo.transform.parent = null;
+            newChild.transform.SetParent(colliderGo.transform);//gets rid of parent
+       
+        }
+     }
+
+    List<int> CreateTriangleArray(Polygon p) //@TODO: fix winding order if it matters unity is counter clockwise 
     {
 
         List<Vector3> verticies = p.getVerticies();
         List<Triangle> tList = p.createTriangles();
-        print(tList[0]);
-        int[] indexList = new int[tList.Count * 3];
+        List<int> indexList = new List<int>();
         int indexTracker = 0;
         foreach (Triangle t in tList)
         {
             foreach(Edge e in t)
             {
-                indexList[indexTracker] = verticies.IndexOf(e.vertex1); 
+                indexList.Add(verticies.IndexOf(e.vertex1)); 
+                
                 indexTracker++;
             }
         }
+        //I want to extrude mesh outward and sqew inwards into 4 sided figure
+        Vector3 planeInterior = Vector3.zero;
+        foreach (Vector3 v in verticies)
+            planeInterior += v;
+        planeInterior /= verticies.Count; //avg is interior of the face that I am using
+
+        Vector3 shapeInterior = Vector3.zero;
+        foreach (Vector3 v in p.EdgeList[0].go.GetComponent<Mesh>().vertices) //this mesh was already swapped swap later
+            shapeInterior += v;
+        shapeInterior /= p.EdgeList[0].go.GetComponent<Mesh>().vertices.Length;
+        p.getNormal(); //need to make sure normal is also pointed the right direction (ou
+
+        //int[] flipped = new int[indexList.Length];
+        //Array.Copy(indexList, flipped, indexList.Length);
+        //Array.Reverse(flipped,0,indexList.Length);
+        //var combined = new int[2*indexList.Length];
+        //indexList.CopyTo(combined, 0);
+        //flipped.CopyTo(combined, indexList.Length);
         return indexList;
     }
 
