@@ -202,7 +202,7 @@ public class MyScript : MonoBehaviour
         GameObject[] allGameObj = findAllGameObj(); //find and curate list of all viewable faces
         GameObject[] allColliderGameObjects = new GameObject[allGameObj.Length];
         configureGameObjs(allGameObj,true);//just assigns colour
-        List<Polygon> myPolygons = FindEdges(allGameObj,false);//finds all outside edges of shape using shared edges and area methods
+        List<Polygon> myPolygons = FindEdges(allGameObj,0);//finds all outside edges of shape using shared edges and area methods
         FindMatchingEdges(ref myPolygons); //edits ref myPolygons to just the inner polygons by finding the matching edges
         CreateColliderPlanes(ref myPolygons); //Create my collider planes from the myPolygons and reassigns the game object attached to my polygon
         
@@ -212,15 +212,15 @@ public class MyScript : MonoBehaviour
         }
         configureGameObjs(allColliderGameObjects,false);
 
-        myPolygons = FindEdges(allColliderGameObjects,true); //@FIXME this is throwing the error myPolygons goes to 0
+        myPolygons = FindEdges(allColliderGameObjects,myPolygons[0].EdgeList.Count); //@FIXME this is throwing the error myPolygons goes to 0
         List<Edge[]> matchingEdges = FindMatchingEdges(ref myPolygons);
         CreateHingeJoints(matchingEdges); //creates hinge joints
         
         CreateLabels(); //Label Angles, Shapes, and Have an array of angles thats updated each frame @TODO:
-        foreach (GameObject go in allGameObj)
-        {
-            go.SetActive(false);
-        }
+        //foreach (GameObject go in allGameObj)
+        //{
+        //    go.SetActive(false);
+        //}
 
     }
     void Update()
@@ -316,7 +316,7 @@ public class MyScript : MonoBehaviour
     /// <param name="GameObjects"></param>
     /// <param name="collider"></param> Used to skip half the verticies on a two faced plane to aid in making hinges
     /// <returns></returns>
-    List<Polygon> FindEdges(GameObject[] GameObjects,bool collider)
+    List<Polygon> FindEdges(GameObject[] GameObjects,int edges)
     {
         Mesh mesh;
         var facePolygons = new List<Polygon>();
@@ -336,8 +336,8 @@ public class MyScript : MonoBehaviour
             int[] triangles = mesh.GetTriangles(0);
             List<Triangle> worldTriangles = new List<Triangle>();
             int loopStop = triangles.Length;
-            if (collider)
-                loopStop /= 2;
+            if (edges!=0)
+                loopStop = edges; //numTriangles? @FIXME could be wrong
             for (int j = 0; j < loopStop - 2; j += 3) //all triangles in world space
             {
                 worldTriangles.Add(new Triangle(worldVertices[triangles[j]], worldVertices[triangles[j + 1]], worldVertices[triangles[j + 2]], GameObjects[i]));
@@ -448,6 +448,7 @@ public class MyScript : MonoBehaviour
             hinge.connectedBody = entry[1].go.GetComponent<Rigidbody>();
             hinge.enableCollision = true;
             uniqueHinges.Add(hinge);
+            Physics.IgnoreCollision(entry[0].go.GetComponent<MeshCollider>(), entry[1].go.GetComponent<MeshCollider>());
         }
     }
 
@@ -491,9 +492,10 @@ public class MyScript : MonoBehaviour
      void CreateColliderPlanes(ref List<Polygon> myPolygons) // List<Edge> edges
      {
         foreach (Polygon p in myPolygons) {
+            List<Vector3> verticiesList = p.getVerticies();
+            
+            int[] triangles = CreateTriangleArray(p,ref verticiesList).ToArray();
             Vector3[] vertices = p.getVerticies().ToArray();
-            int[] triangles = CreateTriangleArray(p).ToArray();
-
             GameObject colliderGo = new GameObject("Mesh", typeof(MeshFilter),typeof(MeshCollider),typeof(MeshRenderer),typeof(Rigidbody));
             var newChild = p.EdgeList[0].go.transform;
             //colliderGo.transform.SetParent(newChild);
@@ -514,10 +516,10 @@ public class MyScript : MonoBehaviour
         }
      }
 
-    List<int> CreateTriangleArray(Polygon p) //@TODO: fix winding order if it matters unity is counter clockwise 
+    List<int> CreateTriangleArray(Polygon p,ref List<Vector3> verticies) //@TODO: fix winding order if it matters unity is counter clockwise 
     {
 
-        List<Vector3> verticies = p.getVerticies();
+        
         List<Triangle> tList = p.createTriangles();
         List<int> indexList = new List<int>();
         int indexTracker = 0;
@@ -530,6 +532,7 @@ public class MyScript : MonoBehaviour
                 indexTracker++;
             }
         }
+        //want my code to ignore everything in the list after these triangles
         //I want to extrude mesh outward and sqew inwards into 4 sided figure
         Vector3 planeInterior = Vector3.zero;
         foreach (Vector3 v in verticies)
@@ -537,11 +540,21 @@ public class MyScript : MonoBehaviour
         planeInterior /= verticies.Count; //avg is interior of the face that I am using
 
         Vector3 shapeInterior = Vector3.zero;
-        foreach (Vector3 v in p.EdgeList[0].go.GetComponent<Mesh>().vertices) //this mesh was already swapped swap later
+        foreach (Vector3 v in p.EdgeList[0].go.GetComponent<MeshFilter>().mesh.vertices) 
             shapeInterior += v;
-        shapeInterior /= p.EdgeList[0].go.GetComponent<Mesh>().vertices.Length;
-        p.getNormal(); //need to make sure normal is also pointed the right direction (ou
-
+        shapeInterior /= p.EdgeList[0].go.GetComponent<MeshFilter>().mesh.vertices.Length;
+        float extrudeDistance = .001F;
+        Vector3 extrudeDirection = (shapeInterior - planeInterior).normalized; //@FIXME I want to go in diretion of shape interior so I think I subtract
+        verticies.Add(planeInterior + extrudeDirection * extrudeDistance);
+        int extrudeVertexIndex = verticies.IndexOf(planeInterior + extrudeDirection * extrudeDistance);
+        //@FIXME winding order could be messed up here
+        foreach(Edge e in p)
+        {
+            indexList.Add(verticies.IndexOf(e.vertex1));
+            indexList.Add(verticies.IndexOf(e.vertex2));
+            indexList.Add(extrudeVertexIndex);
+        }
+        
         //int[] flipped = new int[indexList.Length];
         //Array.Copy(indexList, flipped, indexList.Length);
         //Array.Reverse(flipped,0,indexList.Length);
