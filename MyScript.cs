@@ -120,6 +120,7 @@ class Polygon : IEnumerable
     public List<Edge> EdgeList = new List<Edge>();
     private List<Triangle> TriangleList = new List<Triangle>();
     public Vector3 extrudeDirection;
+    public int numTriangles;
 
     public Polygon(List<Triangle> triangles)
     {
@@ -208,15 +209,15 @@ public class MyScript : MonoBehaviour
         configureGameObjs(allGameObj,true);//Randomly assigns colour
         List<Polygon> myPolygons = findFacePolygons(allGameObj,0);//finds all outside edges of shape using shared edges and area methods
         FindMatchingEdges(ref myPolygons); //edits ref myPolygons to just the inner polygons by finding the matching edges
+
         CreateColliderPlanes(ref myPolygons); //Create my collider planes from the myPolygons and reassigns the game object attached to my polygon
-        
         for (int i = 0; i < myPolygons.Count; i++)
         {
             allColliderGameObjects[i] = myPolygons[i].EdgeList[0].go;
         } //filling up the allColliderGameObject list
         configureGameObjs(allColliderGameObjects,false); //configure but for physics system, no colouring (could change this to include coloring)
-
-        myPolygons = findFacePolygons(allColliderGameObjects,myPolygons[0].EdgeList.Count); 
+        
+        myPolygons = findFacePolygons(allColliderGameObjects,myPolygons[0].numTriangles); //@run a second time to proof that colliders are accurate
         List<Edge[]> matchingEdges = FindMatchingEdges(ref myPolygons); //@FIXME somehow this is not working on the second iteration
         CreateHingeJoints(matchingEdges); 
         
@@ -489,7 +490,7 @@ public class MyScript : MonoBehaviour
     {
         //index out of bounds on first iteration....realPolygons has bad input
         var returnList = new List<Edge[]>();
-        HashSet<Polygon> insideFacePolygons = new HashSet<Polygon>();
+        HashSet<Polygon> insideFacePolygons = new HashSet<Polygon>(); //to avoid duplicates
         for (int i = 0; i < realPolygons.Count; i++)//pick a shape
         {
             for (int j = i + 1; j < realPolygons.Count; j++)//check other shapes
@@ -502,7 +503,7 @@ public class MyScript : MonoBehaviour
                             ((edge1.vertex1 - edge2.vertex2).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex1).magnitude < hingeTolerance))) 
                         {
                             if (Vector3.Cross(realPolygons[i].getNormal(),realPolygons[j].getNormal()).Equals(Vector3.zero)) //If vectors are parallel their cross product should be 0
-                                print("shared Normal");
+                                print("shared Normal"); //probably never gets called because of shared edges algorithm
                             returnList.Add(new Edge[] { edge1, edge2 });
                             insideFacePolygons.Add(realPolygons[i]);
                             insideFacePolygons.Add(realPolygons[j]);
@@ -513,6 +514,7 @@ public class MyScript : MonoBehaviour
             }
         }
         realPolygons = insideFacePolygons.ToList();
+        print("Number of matching edges: " + returnList.Count);
         return returnList;
     }
     /// <summary>
@@ -558,6 +560,7 @@ public class MyScript : MonoBehaviour
                 indexTracker++;
             }
         }
+        p.numTriangles = tList.Count;
         //Want my code to ignore everything in the list after these triangles in order to make hinges only on the plane
 
         //I want to extrude mesh outward and sqew inwards into 4 sided figure
