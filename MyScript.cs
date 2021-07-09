@@ -6,9 +6,10 @@ using UnityEditor;
 using System.Linq;
 /* Need to have parented, no prefab, no rigid bodies, no other modifiers
  * Joints are picked based on how close together they are using the tolerance indicator
- * swap collider planes child and parent hiearchy --child objects may be unkownly moving they should not move once instantiated
- * might need to enable continous collision detection
+ * Make sure made in fusion in meters, 1to1 unity scale factor
+ * Make sure read/write is enabled
  * @ROADMAP:
+ * Make upacking function
  * Removal of faces,edges,hinges
  * Display of angles
  * Display of volume
@@ -194,37 +195,57 @@ public class MyScript : MonoBehaviour
     public double hingeTolerance; //TODO: could calculate this as something to do with the width of the shapes imported
     public bool run;
     public double sideArea;
-    public bool enableColliders; //TODO: make custom colliders just on the inside face of the shape and space out the hinges slightly
+    public bool enableColliders; 
+    public bool hideColliders;
+    public bool hideOutside;
+    public bool updateHingeMotion;
     void Start()
     {
         if (!run)
             return;
         GameObject[] allGameObj = findAllGameObj(); //find and curate list of all viewable faces
-        GameObject[] allColliderGameObjects = new GameObject[allGameObj.Length];
-        configureGameObjs(allGameObj,true);//just assigns colour
-        List<Polygon> myPolygons = FindEdges(allGameObj,0);//finds all outside edges of shape using shared edges and area methods
+        GameObject[] allColliderGameObjects = new GameObject[allGameObj.Length]; //empty list of colliders that the allGameObj will be parented under
+        configureGameObjs(allGameObj,true);//Randomly assigns colour
+        List<Polygon> myPolygons = findFacePolygons(allGameObj,0);//finds all outside edges of shape using shared edges and area methods
         FindMatchingEdges(ref myPolygons); //edits ref myPolygons to just the inner polygons by finding the matching edges
         CreateColliderPlanes(ref myPolygons); //Create my collider planes from the myPolygons and reassigns the game object attached to my polygon
         
         for (int i = 0; i < myPolygons.Count; i++)
         {
             allColliderGameObjects[i] = myPolygons[i].EdgeList[0].go;
-        }
-        configureGameObjs(allColliderGameObjects,false);
+        } //filling up the allColliderGameObject list
+        configureGameObjs(allColliderGameObjects,false); //configure but for physics system, no colouring (could change this to include coloring)
 
-        myPolygons = FindEdges(allColliderGameObjects,myPolygons[0].EdgeList.Count); //@FIXME this is throwing the error myPolygons goes to 0
-        List<Edge[]> matchingEdges = FindMatchingEdges(ref myPolygons);
-        CreateHingeJoints(matchingEdges); //creates hinge joints
+        myPolygons = findFacePolygons(allColliderGameObjects,myPolygons[0].EdgeList.Count); 
+        List<Edge[]> matchingEdges = FindMatchingEdges(ref myPolygons); //@FIXME somehow this is not working on the second iteration
+        CreateHingeJoints(matchingEdges); 
         
+        foreach(GameObject go in allColliderGameObjects) //bool hide colliders
+        {
+            go.GetComponent<MeshRenderer>().forceRenderingOff = hideColliders;
+        }
+        foreach (GameObject go in allGameObj)  //bool hide faces
+        {
+            go.SetActive(!hideOutside);
+        }
+
+
         CreateLabels(); //Label Angles, Shapes, and Have an array of angles thats updated each frame @TODO:
-        //foreach (GameObject go in allGameObj)
-        //{
-        //    go.SetActive(false);
-        //}
+        
 
     }
     void Update()
     {
+        float [] previousHinges = new float[uniqueHinges.Count];
+        if (updateHingeMotion)
+        {
+            for(int i = 0; i<uniqueHinges.Count; i++)
+            {
+                HingeJoint hinge = uniqueHinges[i];
+                print("AngleDelta: "+  Math.Abs(hinge.angle - previousHinges[i])); ;
+                previousHinges[i] = hinge.angle;
+            }
+        }
         
 
     }
@@ -316,7 +337,7 @@ public class MyScript : MonoBehaviour
     /// <param name="GameObjects"></param>
     /// <param name="collider"></param> Used to skip half the verticies on a two faced plane to aid in making hinges
     /// <returns></returns>
-    List<Polygon> FindEdges(GameObject[] GameObjects,int edges)
+    List<Polygon> findFacePolygons(GameObject[] GameObjects,int edges)
     {
         Mesh mesh;
         var facePolygons = new List<Polygon>();
@@ -342,7 +363,7 @@ public class MyScript : MonoBehaviour
             {
                 worldTriangles.Add(new Triangle(worldVertices[triangles[j]], worldVertices[triangles[j + 1]], worldVertices[triangles[j + 2]], GameObjects[i]));
             }
-
+            
             List<Edge> allEdges = FindOutsideEdges(worldTriangles); //find all the edges of a shape
             List<Polygon> realPolygons = findConnectedEdges(allEdges); //this list should always be of size two
 
@@ -358,11 +379,12 @@ public class MyScript : MonoBehaviour
     {
         List<Edge> allEdges = new List<Edge>();
         //I am going to iterate through every single edge and find which edge is unique
-
+        int sideTriangleCount = 0;
         for (int i = 0; i < worldTriangles.Count; i++) //List of all edges
         {
             if (worldTriangles[i].Area < sideArea) //get rid of the side edges
             {
+                sideTriangleCount++;
                 continue;
             }
             foreach (Edge e in worldTriangles[i])
@@ -370,6 +392,7 @@ public class MyScript : MonoBehaviour
                 allEdges.Add(e);
             }
         }
+        //36 edges (12 per face * 3 shapes)
         for (int j = 0; j < allEdges.Count; j++) //if a duplicate exists, remove both as they are interior triangles
         {
             Edge findMatch = allEdges[j];
@@ -384,7 +407,7 @@ public class MyScript : MonoBehaviour
                 }
             }
         }
-        return allEdges;
+        return allEdges; //all edges returning correct value here
     }
 
     /// <summary>
@@ -402,8 +425,14 @@ public class MyScript : MonoBehaviour
 
             for (int j = 1; j < allEdges.Count; j++) //build up polygon
             {
-                if (myPolygon.EdgeList[myPolygon.EdgeList.Count - 1].isConnected(allEdges[j]))
-                    myPolygon.EdgeList.Add(allEdges[j]);
+                foreach (Edge e in myPolygon)
+                {
+                    if (e.isConnected(allEdges[j]))
+                    {
+                        myPolygon.EdgeList.Add(allEdges[j]);
+                        break;
+                    }
+                }
             }
             foreach (Edge edge in myPolygon)
             {
@@ -437,7 +466,7 @@ public class MyScript : MonoBehaviour
     {
         //@FIXME are child objects created at this point
 
-        print(matchingEdges.Count);
+        print("Number of hinges: "+ matchingEdges.Count);
         foreach (Edge[] entry in matchingEdges)
         {
 
@@ -455,9 +484,10 @@ public class MyScript : MonoBehaviour
     /// <summary>
     /// Finds matching edges using global hingeTolerance, and finding edges that match in length. This also determines which polygons are inward facing replacing the old findInside method.
     /// </summary>
-    /// <param name="realPolygons"> List of finalized polygons (size 2) </param>
+    /// <param name="realPolygons"> List of finalized polygons </param>
     List<Edge[]> FindMatchingEdges(ref List<Polygon> realPolygons) 
     {
+        //index out of bounds on first iteration....realPolygons has bad input
         var returnList = new List<Edge[]>();
         HashSet<Polygon> insideFacePolygons = new HashSet<Polygon>();
         for (int i = 0; i < realPolygons.Count; i++)//pick a shape
@@ -469,9 +499,9 @@ public class MyScript : MonoBehaviour
                     foreach (Edge edge2 in realPolygons[j])
                     {
                         if ((((edge1.vertex1 - edge2.vertex1).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex2).magnitude < hingeTolerance) ||
-                            ((edge1.vertex1 - edge2.vertex2).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex1).magnitude < hingeTolerance)) && edge1.length - edge2.length < 1)
+                            ((edge1.vertex1 - edge2.vertex2).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex1).magnitude < hingeTolerance))) 
                         {
-                            if (realPolygons[i].getNormal().Equals(realPolygons[j].getNormal())) //@FIXME come up with method for determining if normals are relatively close
+                            if (Vector3.Cross(realPolygons[i].getNormal(),realPolygons[j].getNormal()).Equals(Vector3.zero)) //If vectors are parallel their cross product should be 0
                                 print("shared Normal");
                             returnList.Add(new Edge[] { edge1, edge2 });
                             insideFacePolygons.Add(realPolygons[i]);
@@ -491,14 +521,15 @@ public class MyScript : MonoBehaviour
     /// <param name="myPolygons"></param>
      void CreateColliderPlanes(ref List<Polygon> myPolygons) // List<Edge> edges
      {
+        print("Number of polygons (colliders): " + myPolygons.Count);
+
         foreach (Polygon p in myPolygons) {
             List<Vector3> verticiesList = p.getVerticies();
-            
             int[] triangles = CreateTriangleArray(p,ref verticiesList).ToArray();
             Vector3[] vertices = p.getVerticies().ToArray();
             GameObject colliderGo = new GameObject("Mesh", typeof(MeshFilter),typeof(MeshCollider),typeof(MeshRenderer),typeof(Rigidbody));
             var newChild = p.EdgeList[0].go.transform;
-            //colliderGo.transform.SetParent(newChild);
+
             Mesh mesh = new Mesh();
             colliderGo.GetComponent<MeshFilter>().mesh = mesh;
             colliderGo.GetComponent<MeshCollider>().sharedMesh = mesh;
@@ -509,17 +540,12 @@ public class MyScript : MonoBehaviour
             {
                 e.go = colliderGo;
             }
-            
-            //colliderGo.transform.parent = null;
             newChild.transform.SetParent(colliderGo.transform);//gets rid of parent
-       
         }
      }
 
-    List<int> CreateTriangleArray(Polygon p,ref List<Vector3> verticies) //@TODO: fix winding order if it matters unity is counter clockwise 
+    List<int> CreateTriangleArray(Polygon p,ref List<Vector3> verticies) //Assuming winding order does not matter for colliders -- if needed uncomment out the flipped code to make figure double sided
     {
-
-        
         List<Triangle> tList = p.createTriangles();
         List<int> indexList = new List<int>();
         int indexTracker = 0;
@@ -532,12 +558,13 @@ public class MyScript : MonoBehaviour
                 indexTracker++;
             }
         }
-        //want my code to ignore everything in the list after these triangles
+        //Want my code to ignore everything in the list after these triangles in order to make hinges only on the plane
+
         //I want to extrude mesh outward and sqew inwards into 4 sided figure
         Vector3 planeInterior = Vector3.zero;
         foreach (Vector3 v in verticies)
             planeInterior += v;
-        planeInterior /= verticies.Count; //avg is interior of the face that I am using
+        planeInterior /= verticies.Count; 
 
         Vector3 shapeInterior = Vector3.zero;
         foreach (Vector3 v in p.EdgeList[0].go.GetComponent<MeshFilter>().mesh.vertices) 
@@ -547,7 +574,7 @@ public class MyScript : MonoBehaviour
         Vector3 extrudeDirection = (shapeInterior - planeInterior).normalized; //@FIXME I want to go in diretion of shape interior so I think I subtract
         verticies.Add(planeInterior + extrudeDirection * extrudeDistance);
         int extrudeVertexIndex = verticies.IndexOf(planeInterior + extrudeDirection * extrudeDistance);
-        //@FIXME winding order could be messed up here
+        
         foreach(Edge e in p)
         {
             indexList.Add(verticies.IndexOf(e.vertex1));
@@ -575,3 +602,4 @@ public class MyScript : MonoBehaviour
     
 
 }
+ 
