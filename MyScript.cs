@@ -207,7 +207,7 @@ public class MyScript : MonoBehaviour
         GameObject[] allGameObj = findAllGameObj(); //find and curate list of all viewable faces
         GameObject[] allColliderGameObjects = new GameObject[allGameObj.Length]; //empty list of colliders that the allGameObj will be parented under
         configureGameObjs(allGameObj,true);//Randomly assigns colour
-        List<Polygon> myPolygons = findFacePolygons(allGameObj,0);//finds all outside edges of shape using shared edges and area methods
+        List<Polygon> myPolygons = FindFacePolygons(allGameObj,0);//finds all outside edges of shape using shared edges and area methods
         FindMatchingEdges(ref myPolygons); //edits ref myPolygons to just the inner polygons by finding the matching edges
 
         CreateColliderPlanes(ref myPolygons); //Create my collider planes from the myPolygons and reassigns the game object attached to my polygon
@@ -217,7 +217,7 @@ public class MyScript : MonoBehaviour
         } //filling up the allColliderGameObject list
         configureGameObjs(allColliderGameObjects,false); //configure but for physics system, no colouring (could change this to include coloring)
         
-        myPolygons = findFacePolygons(allColliderGameObjects,myPolygons[0].numTriangles); //@run a second time to proof that colliders are accurate
+        myPolygons = FindFacePolygons(allColliderGameObjects,myPolygons[0].numTriangles*3); //@run a second time to proof that colliders are accurate
         List<Edge[]> matchingEdges = FindMatchingEdges(ref myPolygons); //@FIXME somehow this is not working on the second iteration
         CreateHingeJoints(matchingEdges); 
         
@@ -338,7 +338,7 @@ public class MyScript : MonoBehaviour
     /// <param name="GameObjects"></param>
     /// <param name="collider"></param> Used to skip half the verticies on a two faced plane to aid in making hinges
     /// <returns></returns>
-    List<Polygon> findFacePolygons(GameObject[] GameObjects,int edges)
+    List<Polygon> FindFacePolygons(GameObject[] GameObjects,int edges)
     {
         Mesh mesh;
         var facePolygons = new List<Polygon>();
@@ -584,7 +584,7 @@ public class MyScript : MonoBehaviour
             indexList.Add(verticies.IndexOf(e.vertex2));
             indexList.Add(extrudeVertexIndex);
         }
-        
+        //@FIXME Colliders not quite working as intended
         //int[] flipped = new int[indexList.Length];
         //Array.Copy(indexList, flipped, indexList.Length);
         //Array.Reverse(flipped,0,indexList.Length);
