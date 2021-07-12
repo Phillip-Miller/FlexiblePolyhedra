@@ -9,6 +9,7 @@ using System.Linq;
  * Make sure made in fusion in meters, 1to1 unity scale factor
  * Make sure read/write is enabled
  * @ROADMAP:
+ * Line 220 will cause issues for shapes with squares and triangles
  * Make upacking function
  * Removal of faces,edges,hinges
  * Display of angles
@@ -217,7 +218,7 @@ public class MyScript : MonoBehaviour
         } //filling up the allColliderGameObject list
         configureGameObjs(allColliderGameObjects,false); //configure but for physics system, no colouring (could change this to include coloring)
         
-        myPolygons = FindFacePolygons(allColliderGameObjects,myPolygons[0].numTriangles*3); //@run a second time to proof that colliders are accurate
+        myPolygons = FindFacePolygons(allColliderGameObjects,myPolygons[0].numTriangles*3); //@fixme need help for when each shape has different number of sides. @TODO:
         List<Edge[]> matchingEdges = FindMatchingEdges(ref myPolygons); //@FIXME somehow this is not working on the second iteration
         CreateHingeJoints(matchingEdges); 
         
