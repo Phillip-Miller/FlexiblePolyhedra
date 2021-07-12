@@ -1,9 +1,10 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 /*
  * Enables user input
+ * TODO: enable highlighting of faces 
+ * Enable removal of edges
+ * Enable removal of faces
  */
 public class Controller : MonoBehaviour
 {
@@ -21,10 +22,10 @@ public class Controller : MonoBehaviour
     Shift : Increase speed
     Space : Moves camera up per its local Y-axis
     Cntrl : Moves camera down per its local Y-axis
-    left click = apply force push to normal on face
-    shift left click = apply force pull to normal on face 
-    right click is stop face from moving
-
+    left click : apply force push to normal on face
+    shift left click : apply force pull to normal on face 
+    right click : stop face from moving
+    alt click : remove face
     */
     
      
@@ -37,7 +38,7 @@ public class Controller : MonoBehaviour
         Vector3 c_Rotation = GetBaseRotation() * rotationSpeed * Time.deltaTime;
         transform.Translate(c_Velocity);
         transform.Rotate(c_Rotation);
-        if (Input.GetMouseButton(0)) //not clear if normal calculated is correct
+        if (Input.GetMouseButtonDown(0)) //not clear if normal calculated is correct
         {
             Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
             RaycastHit hit;
@@ -45,29 +46,30 @@ public class Controller : MonoBehaviour
             {
                 
                 var go = hit.collider.gameObject;
-                Debug.Log("Left click" + go.name);
-                if (Input.GetKey(KeyCode.LeftShift))
+                if(Input.GetKey(KeyCode.LeftAlt))
+                {
+                    Destroy(go);
+                }
+                else if (Input.GetKey(KeyCode.LeftShift))
                 {
 
                     go.GetComponent<Rigidbody>().AddForce(1 * hit.normal * forceMultiplier);
-                    print("SHIFT" + -1 * hit.normal * forceMultiplier);
+                    
                 }
                 else
                 {
                     go.GetComponent<Rigidbody>().AddForce(-1 * hit.normal * forceMultiplier);
-                    print("NOSHIFT" + -1 * hit.normal * forceMultiplier);
 
                 }
             }
         }
-        if (Input.GetMouseButton(1))
+        if (Input.GetMouseButtonDown(1))
         { //right click
             Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
             RaycastHit hit;
             if (Physics.Raycast(ray, out hit))
             {
                 var go = hit.collider.gameObject;
-                Debug.Log("Right click" + go.name);
                 var Rb = go.GetComponent<Rigidbody>();
                 Rb.angularVelocity= Vector3.zero;
                 Rb.velocity = Vector3.zero;
