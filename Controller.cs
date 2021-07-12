@@ -3,14 +3,14 @@ using UnityEngine;
 /*
  * Enables user input
  * TODO: enable highlighting of faces 
- * Enable removal of edges
- * Enable removal of faces
  */
 public class Controller : MonoBehaviour
 {
-    public float movementSpeed;
-    public float rotationSpeed;
+    private float movementSpeed =10;
+    private float rotationSpeed = 40;
     public float forceMultiplier;
+    private GameObject firstHingeGo = null;
+    private GameObject secondHingeGo = null;
     // Start is called before the first frame update
     void Start()
     {
@@ -26,6 +26,8 @@ public class Controller : MonoBehaviour
     shift left click : apply force pull to normal on face 
     right click : stop face from moving
     alt click : remove face
+
+    H + click 2 faces: remove shared hinge between them
     */
     
      
@@ -33,20 +35,61 @@ public class Controller : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-
+        
         Vector3 c_Velocity = GetBaseMovement() * movementSpeed * Time.deltaTime;
         Vector3 c_Rotation = GetBaseRotation() * rotationSpeed * Time.deltaTime;
         transform.Translate(c_Velocity);
         transform.Rotate(c_Rotation);
-        if (Input.GetMouseButtonDown(0)) //not clear if normal calculated is correct
+        if (!Input.GetKey(KeyCode.H))
+        {
+            firstHingeGo = null;
+            secondHingeGo = null;
+        }
+
+        if (Input.GetKey(KeyCode.H))
+        {
+            if (Input.GetMouseButtonDown(0)) //for somereason this makes me do a physical click instead of a tap
+            {
+                Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+                RaycastHit hit;
+                if (Physics.Raycast(ray, out hit))
+                {
+                    if (firstHingeGo == null)
+                        firstHingeGo = hit.collider.gameObject;
+                    else
+                        secondHingeGo = hit.collider.gameObject;
+                }
+                if(firstHingeGo != null && secondHingeGo != null)
+                {
+                    //user has selected two game object and now conditions are met to remove the shared hinge between them
+                    foreach(HingeJoint hinge in firstHingeGo.GetComponents<HingeJoint>())
+                    {
+                        if(hinge.connectedBody == secondHingeGo.GetComponent<Rigidbody>())
+                        {
+                            print("Removing shared hinge");
+                            Destroy(hinge);
+                        }
+                    }
+                    foreach (HingeJoint hinge in secondHingeGo.GetComponents<HingeJoint>())
+                    {
+                        if (hinge.connectedBody == firstHingeGo.GetComponent<Rigidbody>())
+                        {
+                            print("Removing shared hinge");
+                            Destroy(hinge);
+                        }
+                    }
+                }
+            }
+        }
+        else if (Input.GetMouseButtonDown(0)) //not clear if normal calculated is correct
         {
             Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
             RaycastHit hit;
             if (Physics.Raycast(ray, out hit))
             {
-                
+
                 var go = hit.collider.gameObject;
-                if(Input.GetKey(KeyCode.LeftAlt))
+                if (Input.GetKey(KeyCode.LeftAlt))
                 {
                     Destroy(go);
                 }
@@ -54,7 +97,7 @@ public class Controller : MonoBehaviour
                 {
 
                     go.GetComponent<Rigidbody>().AddForce(1 * hit.normal * forceMultiplier);
-                    
+
                 }
                 else
                 {
@@ -63,7 +106,7 @@ public class Controller : MonoBehaviour
                 }
             }
         }
-        if (Input.GetMouseButtonDown(1))
+        else if (Input.GetMouseButtonDown(1))
         { //right click
             Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
             RaycastHit hit;
@@ -71,11 +114,12 @@ public class Controller : MonoBehaviour
             {
                 var go = hit.collider.gameObject;
                 var Rb = go.GetComponent<Rigidbody>();
-                Rb.angularVelocity= Vector3.zero;
+                Rb.angularVelocity = Vector3.zero;
                 Rb.velocity = Vector3.zero;
 
             }
         }
+        
     }
     Vector3 GetBaseRotation()
     {
