@@ -9,9 +9,7 @@ using System.Linq;
  * Make sure made in fusion in meters, 1to1 unity scale factor
  * Make sure read/write is enabled
  * @ROADMAP:
- * Line 220 will cause issues for shapes with squares and triangles
  * Make upacking function
- * Removal of faces,edges,hinges
  * Display of angles
  * Display of volume
  * 
@@ -191,24 +189,20 @@ class Polygon : IEnumerable
 public class MyScript : MonoBehaviour
 {
     List<HingeJoint> uniqueHinges = new List<HingeJoint>();
-    public GameObject parentModel; //On run: link the parent and unpack it if still a prefab
-    public bool useGravity; //false by default
-    public bool recolour;
+    public bool autoUnpack;
+    public bool useGravity; 
     public double hingeTolerance; //TODO: could calculate this as something to do with the width of the shapes imported
-    public bool run;
     public double sideArea;
-    public bool enableColliders; 
     public bool hideColliders;
     public bool hideOutside;
     public bool updateHingeMotion;
     void Start()
     {
-        if (!run)
-            return;
-        GameObject[] allGameObj = findAllGameObj(); //find and curate list of all viewable faces
+        parentModel = this.gameObject;
+        GameObject[] allGameObj = FindAllGameObjects(); //find and curate list of all viewable faces
         GameObject[] allColliderGameObjects = new GameObject[allGameObj.Length]; //empty list of colliders that the allGameObj will be parented under
-        configureGameObjs(allGameObj,true);//Randomly assigns colour
-        List<Polygon> myPolygons = FindFacePolygons(allGameObj,0);//finds all outside edges of shape using shared edges and area methods
+        ConfigureGameObjects(allGameObj,true);//Randomly assigns colour
+        List<Polygon> myPolygons = FindFacePolygons(allGameObj,null);//finds all outside edges of shape using shared edges and area methods
         FindMatchingEdges(ref myPolygons); //edits ref myPolygons to just the inner polygons by finding the matching edges
 
         CreateColliderPlanes(ref myPolygons); //Create my collider planes from the myPolygons and reassigns the game object attached to my polygon
@@ -216,9 +210,9 @@ public class MyScript : MonoBehaviour
         {
             allColliderGameObjects[i] = myPolygons[i].EdgeList[0].go;
         } //filling up the allColliderGameObject list
-        configureGameObjs(allColliderGameObjects,false); //configure but for physics system, no colouring (could change this to include coloring)
+        ConfigureGameObjects(allColliderGameObjects,false); //configure but for physics system, no colouring (could change this to include coloring)
         
-        myPolygons = FindFacePolygons(allColliderGameObjects,myPolygons[0].numTriangles*3); //@fixme need help for when each shape has different number of sides. @TODO:
+        myPolygons = FindFacePolygons(allColliderGameObjects,myPolygons); //@fixme need help for when each shape has different number of sides. @TODO:
         List<Edge[]> matchingEdges = FindMatchingEdges(ref myPolygons); //@FIXME somehow this is not working on the second iteration
         CreateHingeJoints(matchingEdges); 
         
@@ -230,6 +224,9 @@ public class MyScript : MonoBehaviour
         {
             go.SetActive(!hideOutside);
         }
+        print("Number of face colliders detected: " + allColliderGameObjects.Length);
+        print("Number of hinges: " + matchingEdges.Count);
+        print(myPolygons[0].EdgeList.Count + "-gon");
 
 
         CreateLabels(); //Label Angles, Shapes, and Have an array of angles thats updated each frame @TODO:
@@ -254,22 +251,34 @@ public class MyScript : MonoBehaviour
     /// <summary>
     ///Returns a list of all game objects under the parented object <parentModel> (parent object not included)
     /// </summary>
-    GameObject[] findAllGameObj()
+    GameObject[] FindAllGameObjects()
     {
+        
         GameObject[] gameObjectArray = new GameObject[parentModel.transform.childCount];
-
-        for (int i = 0; i < parentModel.transform.childCount; i++)
+        if (!autoUnpack)
         {
-            GameObject child = parentModel.transform.GetChild(i).gameObject;
-            gameObjectArray[i] = child;
+            for (int i = 0; i < parentModel.transform.childCount; i++)
+            {
+                GameObject child = parentModel.transform.GetChild(i).gameObject;
+                gameObjectArray[i] = child;
+            }
+            return gameObjectArray;
+        }
+
+       // PrefabUtility.UnpackPrefabInstance(parentModel, PrefabUnpackMode.OutermostRoot,InteractionMode.AutomatedAction);
+        int childCount = parentModel.transform.childCount;
+        for (int i = 0; i < childCount; i++)
+        {
+            gameObjectArray[i] = parentModel.transform.GetChild(i).transform.GetChild(0).transform.GetChild(0).gameObject;
         }
         return gameObjectArray;
+        
     }
     /// <summary>
     /// applies ridgid body, enables is kinematic,applys random colors 
     /// </summary>
     /// <param name="allGameObjects"> allGameObject to be configured </param>
-    void configureGameObjs(GameObject[] allGameObjects,bool face) //TODO: have an assigned list that way colors dont get reused
+    void ConfigureGameObjects(GameObject[] allGameObjects,bool face) //TODO: have an assigned list that way colors dont get reused
     {
         
         bool first = true; //we want the first one to be kinematic such that it stays in place (equivalent of grounding in fusion360)
@@ -287,22 +296,21 @@ public class MyScript : MonoBehaviour
                     rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
                 else
                     rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
-                if (enableColliders)
-                {
-                    MeshCollider c = go.GetComponent<MeshCollider>();
-                    c.convex = true;
-                    c.enabled = true;
-                }
+                
+                MeshCollider c = go.GetComponent<MeshCollider>();
+                c.convex = true;
+                c.enabled = true;
+                
                 first = false;
             }
-            else if (recolour)
+            else
             {
                 var colorChange = go.GetComponent<Renderer>(); //randomizing the color attached to get easy to view multicolor faces
                 colorChange.material.SetColor("_Color", UnityEngine.Random.ColorHSV(0f, 1f, 1f, 1f, 0.5f, 1f));
             }
         }
     }
-
+    
     Vector3 CalculateInside(GameObject[] allGameObjects)
     {
         float avgX = 0; float avgY = 0; float avgZ = 0;
@@ -339,7 +347,7 @@ public class MyScript : MonoBehaviour
     /// <param name="GameObjects"></param>
     /// <param name="collider"></param> Used to skip half the verticies on a two faced plane to aid in making hinges
     /// <returns></returns>
-    List<Polygon> FindFacePolygons(GameObject[] GameObjects,int edges)
+    List<Polygon> FindFacePolygons(GameObject[] GameObjects, List<Polygon> myPolygons)
     {
         Mesh mesh;
         var facePolygons = new List<Polygon>();
@@ -359,15 +367,15 @@ public class MyScript : MonoBehaviour
             int[] triangles = mesh.GetTriangles(0);
             List<Triangle> worldTriangles = new List<Triangle>();
             int loopStop = triangles.Length;
-            if (edges!=0)
-                loopStop = edges; //numTriangles? @FIXME could be wrong
+            if (myPolygons!=null)
+                loopStop = myPolygons[i].numTriangles * 3; //loopStop should be how many verticies are in the polygon
             for (int j = 0; j < loopStop - 2; j += 3) //all triangles in world space
             {
                 worldTriangles.Add(new Triangle(worldVertices[triangles[j]], worldVertices[triangles[j + 1]], worldVertices[triangles[j + 2]], GameObjects[i]));
             }
             
             List<Edge> allEdges = FindOutsideEdges(worldTriangles); //find all the edges of a shape
-            List<Polygon> realPolygons = findConnectedEdges(allEdges); //this list should always be of size two
+            List<Polygon> realPolygons = FindConnectedEdges(allEdges); //this list should always be of size two
 
             foreach (Polygon poly in realPolygons) 
             {
@@ -394,7 +402,6 @@ public class MyScript : MonoBehaviour
                 allEdges.Add(e);
             }
         }
-        //36 edges (12 per face * 3 shapes)
         for (int j = 0; j < allEdges.Count; j++) //if a duplicate exists, remove both as they are interior triangles
         {
             Edge findMatch = allEdges[j];
@@ -409,7 +416,7 @@ public class MyScript : MonoBehaviour
                 }
             }
         }
-        return allEdges; //all edges returning correct value here
+        return allEdges; 
     }
 
     /// <summary>
@@ -417,7 +424,7 @@ public class MyScript : MonoBehaviour
     /// </summary>
     /// <param name="allEdges"></param>
     /// <returns></returns>
-    List<Polygon> findConnectedEdges(List<Edge> allEdges)
+    List<Polygon> FindConnectedEdges(List<Edge> allEdges)
     {
         var finalizedPolygons = new List<Polygon>();
         while (allEdges.Count != 0)
@@ -468,7 +475,6 @@ public class MyScript : MonoBehaviour
     {
         //@FIXME are child objects created at this point
 
-        print("Number of hinges: "+ matchingEdges.Count);
         foreach (Edge[] entry in matchingEdges)
         {
 
@@ -515,7 +521,6 @@ public class MyScript : MonoBehaviour
             }
         }
         realPolygons = insideFacePolygons.ToList();
-        print("Number of matching edges: " + returnList.Count);
         return returnList;
     }
     /// <summary>
@@ -524,7 +529,6 @@ public class MyScript : MonoBehaviour
     /// <param name="myPolygons"></param>
      void CreateColliderPlanes(ref List<Polygon> myPolygons) // List<Edge> edges
      {
-        print("Number of polygons (colliders): " + myPolygons.Count);
 
         foreach (Polygon p in myPolygons) {
             List<Vector3> verticiesList = p.getVerticies();
@@ -585,13 +589,13 @@ public class MyScript : MonoBehaviour
             indexList.Add(verticies.IndexOf(e.vertex2));
             indexList.Add(extrudeVertexIndex);
         }
-        //@FIXME Colliders not quite working as intended
-        //int[] flipped = new int[indexList.Length];
-        //Array.Copy(indexList, flipped, indexList.Length);
-        //Array.Reverse(flipped,0,indexList.Length);
-        //var combined = new int[2*indexList.Length];
-        //indexList.CopyTo(combined, 0);
-        //flipped.CopyTo(combined, indexList.Length);
+        
+        int[] flipped = new int[indexList.Count];
+        Array.Copy(indexList.ToArray(), flipped, indexList.Count);
+        Array.Reverse(flipped,0,indexList.Count);
+        var combined = new int[2*indexList.Count];
+        indexList.CopyTo(combined, 0);
+        flipped.CopyTo(combined, indexList.Count);
         return indexList;
     }
 
