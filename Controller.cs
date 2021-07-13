@@ -18,14 +18,14 @@ public class Controller : MonoBehaviour
     }
     /*
     Controls:
-    WASD  : Directional movement
-    Shift : Increase speed
+    WASD  : Camera directional movement
+    ArrowKeys : Camera rotational movement 
     Space : Moves camera up per its local Y-axis
     Cntrl : Moves camera down per its local Y-axis
-    left click : apply force push to normal on face
-    shift left click : apply force pull to normal on face 
-    right click : stop face from moving
-    alt click : remove face
+    Left click : apply force push to normal on face
+    Shift left click : apply force pull to normal on face 
+    Right click : stop face from moving
+    Alt click : remove face
 
     H + click 2 faces: remove shared hinge between them
     */
