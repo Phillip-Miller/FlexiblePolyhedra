@@ -189,6 +189,7 @@ class Polygon : IEnumerable
 public class MyScript : MonoBehaviour
 {
     List<HingeJoint> uniqueHinges = new List<HingeJoint>();
+    private GameObject parentModel;
     public bool autoUnpack;
     public bool useGravity; 
     public double hingeTolerance; //TODO: could calculate this as something to do with the width of the shapes imported
@@ -198,6 +199,12 @@ public class MyScript : MonoBehaviour
     public bool updateHingeMotion;
     void Start()
     {
+        //Physics settings
+        Physics.defaultSolverIterations = 50;
+        Time.maximumDeltaTime = 5; //seconds
+        Time.fixedDeltaTime = 0.01F;
+        Physics.defaultContactOffset = .05F; //default is .01
+
         parentModel = this.gameObject;
         GameObject[] allGameObj = FindAllGameObjects(); //find and curate list of all viewable faces
         GameObject[] allColliderGameObjects = new GameObject[allGameObj.Length]; //empty list of colliders that the allGameObj will be parented under
