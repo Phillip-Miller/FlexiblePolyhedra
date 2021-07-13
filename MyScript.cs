@@ -9,6 +9,8 @@ using System.Linq;
  * Make sure made in fusion in meters, 1to1 unity scale factor
  * Make sure read/write is enabled
  * @ROADMAP:
+ * The Kinematic one might be able to not detect collisions
+ * Make upacking function
  * Display of angles
  * Display of volume
  * 
@@ -196,7 +198,12 @@ public class MyScript : MonoBehaviour
     private bool hideColliders = true;
     private bool hideOutside = false;
     public bool updateHingeMotion;
-    GameObject[] allColliderGameObjects;
+
+    private List<GameObject> ColliderGoList;
+
+    [System.NonSerialized]
+    public bool gameObjectDestroyed;
+
     void Start()
     {
         //Physics settings
@@ -207,7 +214,7 @@ public class MyScript : MonoBehaviour
 
         parentModel = this.gameObject;
         GameObject[] allGameObj = FindAllGameObjects(); //find and curate list of all viewable faces
-        allColliderGameObjects = new GameObject[allGameObj.Length]; //empty list of colliders that the allGameObj will be parented under
+        GameObject [] allColliderGameObjects = new GameObject[allGameObj.Length]; //empty list of colliders that the allGameObj will be parented under
         ConfigureGameObjects(allGameObj,true);//Randomly assigns colour
         List<Polygon> myPolygons = FindFacePolygons(allGameObj,null);//finds all outside edges of shape using shared edges and area methods
         FindMatchingEdges(ref myPolygons); //edits ref myPolygons to just the inner polygons by finding the matching edges
@@ -235,23 +242,38 @@ public class MyScript : MonoBehaviour
         print("Number of hinges: " + matchingEdges.Count);
         print(myPolygons[0].EdgeList.Count + "-gon");
 
-
+        ColliderGoList = new List<GameObject>(allColliderGameObjects);
+        gameObjectDestroyed = false;
         CreateLabels(); //Label Angles, Shapes, and Have an array of angles thats updated each frame @TODO:
         
 
     }
     void Update()
     {
-        bool isGrounded = false; //checking if my grounded is deleted could be a preformance hit
-        foreach(GameObject go in allColliderGameObjects)
+        if (gameObjectDestroyed)
         {
-            if (go.GetComponent<Rigidbody>().isKinematic)
-                isGrounded = true;
-        }
-        if (!isGrounded)
-            allColliderGameObjects[0].GetComponent<Rigidbody>().isKinematic = true;
+            gameObjectDestroyed = true;
+            for (int i = 0; i < ColliderGoList.Count; i++)
+            {
 
-        
+                try
+                {
+                    var rb = ColliderGoList[i].GetComponent<Rigidbody>();
+                }
+                catch (Exception)
+                {
+                    ColliderGoList.RemoveAt(i);
+                    if (ColliderGoList.Count != 0) {
+                        ColliderGoList[0].GetComponent<Rigidbody>().collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+                        ColliderGoList[0].GetComponent<Rigidbody>().isKinematic = true;
+                    }
+                    break;
+                }
+            }
+        }
+
+
+
         float [] previousHinges = new float[uniqueHinges.Count];
         if (updateHingeMotion)
         {
@@ -595,7 +617,7 @@ public class MyScript : MonoBehaviour
         foreach (Vector3 v in p.EdgeList[0].go.GetComponent<MeshFilter>().mesh.vertices) 
             shapeInterior += v;
         shapeInterior /= p.EdgeList[0].go.GetComponent<MeshFilter>().mesh.vertices.Length;
-        float extrudeDistance = .001F;
+        float extrudeDistance = .005F;
         Vector3 extrudeDirection = (shapeInterior - planeInterior).normalized; //@FIXME I want to go in diretion of shape interior so I think I subtract
         verticies.Add(planeInterior + extrudeDirection * extrudeDistance);
         int extrudeVertexIndex = verticies.IndexOf(planeInterior + extrudeDirection * extrudeDistance);
