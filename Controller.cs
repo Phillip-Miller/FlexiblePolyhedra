@@ -8,7 +8,7 @@ public class Controller : MonoBehaviour
 {
     private float movementSpeed =10;
     private float rotationSpeed = 40;
-    public float forceMultiplier;
+    private float forceMultiplier = 50;
     private GameObject firstHingeGo = null;
     private GameObject secondHingeGo = null;
     // Start is called before the first frame update
