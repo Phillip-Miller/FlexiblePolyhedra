@@ -11,10 +11,13 @@ public class Controller : MonoBehaviour
     private float forceMultiplier = 50;
     private GameObject firstHingeGo = null;
     private GameObject secondHingeGo = null;
+    public GameObject parentModel;
+    private MyScript mainScript;
+
     // Start is called before the first frame update
     void Start()
     {
-
+        mainScript = parentModel.GetComponent<MyScript>();
     }
     /*
     Controls:
@@ -89,8 +92,9 @@ public class Controller : MonoBehaviour
             {
 
                 var go = hit.collider.gameObject;
-                if (Input.GetKey(KeyCode.LeftAlt))
+                if (Input.GetKey(KeyCode.LeftAlt)) //delete an object
                 {
+                    mainScript.gameObjectDestroyed = true;
                     Destroy(go);
                 }
                 else if (Input.GetKey(KeyCode.LeftShift))
