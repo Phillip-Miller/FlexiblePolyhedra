@@ -9,7 +9,6 @@ using System.Linq;
  * Make sure made in fusion in meters, 1to1 unity scale factor
  * Make sure read/write is enabled
  * @ROADMAP:
- * Make upacking function
  * Display of angles
  * Display of volume
  * 
@@ -195,19 +194,20 @@ public class MyScript : MonoBehaviour
     public double hingeTolerance; //TODO: could calculate this as something to do with the width of the shapes imported
     public double sideArea;
     private bool hideColliders = true;
-    private bool hideOutside = true;
+    private bool hideOutside = false;
     public bool updateHingeMotion;
+    GameObject[] allColliderGameObjects;
     void Start()
     {
         //Physics settings
-        Physics.defaultSolverIterations = 50;
+        Physics.defaultSolverIterations = 60;
         Time.maximumDeltaTime = 5; //seconds
-        Time.fixedDeltaTime = 0.01F;
+        Time.fixedDeltaTime = 0.001F;
         Physics.defaultContactOffset = .05F; //default is .01
 
         parentModel = this.gameObject;
         GameObject[] allGameObj = FindAllGameObjects(); //find and curate list of all viewable faces
-        GameObject[] allColliderGameObjects = new GameObject[allGameObj.Length]; //empty list of colliders that the allGameObj will be parented under
+        allColliderGameObjects = new GameObject[allGameObj.Length]; //empty list of colliders that the allGameObj will be parented under
         ConfigureGameObjects(allGameObj,true);//Randomly assigns colour
         List<Polygon> myPolygons = FindFacePolygons(allGameObj,null);//finds all outside edges of shape using shared edges and area methods
         FindMatchingEdges(ref myPolygons); //edits ref myPolygons to just the inner polygons by finding the matching edges
@@ -242,6 +242,16 @@ public class MyScript : MonoBehaviour
     }
     void Update()
     {
+        bool isGrounded = false; //checking if my grounded is deleted could be a preformance hit
+        foreach(GameObject go in allColliderGameObjects)
+        {
+            if (go.GetComponent<Rigidbody>().isKinematic)
+                isGrounded = true;
+        }
+        if (!isGrounded)
+            allColliderGameObjects[0].GetComponent<Rigidbody>().isKinematic = true;
+
+        
         float [] previousHinges = new float[uniqueHinges.Count];
         if (updateHingeMotion)
         {
