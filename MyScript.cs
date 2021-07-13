@@ -194,8 +194,8 @@ public class MyScript : MonoBehaviour
     public bool useGravity; 
     public double hingeTolerance; //TODO: could calculate this as something to do with the width of the shapes imported
     public double sideArea;
-    public bool hideColliders;
-    public bool hideOutside;
+    private bool hideColliders = true;
+    private bool hideOutside = true;
     public bool updateHingeMotion;
     void Start()
     {
