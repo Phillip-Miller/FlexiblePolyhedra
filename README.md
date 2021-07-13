@@ -4,7 +4,7 @@ Research project 6/7/2021
 # How to use
 -Create shape in Fusion360 using meter as base unit. Make each face a seperate component.
 
- Use join feature where you want hinges to appear. Make the edges fairly small
+ Use join feature where you want hinges to appear. Make the edges fairly small. Make sure system settings is in meters.
  
 -Export shape as FBX
 
@@ -12,7 +12,9 @@ Research project 6/7/2021
 
 -Drag MyScript.cs onto the FBX
 
--Drag Contrller.cs onto the camera
+-Drag Controller.cs onto the camera
+
+-Drag model onto Controller parameter on camera
 
 -Apply settings and click play.
 
