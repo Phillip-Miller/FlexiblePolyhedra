@@ -1,15 +1,19 @@
-using System;
 using System.Collections;
+using System;
 using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
-/* No Hinge Pure Math Model
- * Set square with 90 degree angles and faces with non 90
- * Angle D will be tracked as inside and converted upon inputs if needed
+using UnityEditor;
+using System.Linq;
+/* Need to have parented, no prefab, no rigid bodies, no other modifiers
+ * Joints are picked based on how close together they are using the tolerance indicator
+ * Make sure made in fusion in meters, 1to1 unity scale factor
+ * Make sure read/write is enabled
+ * @ROADMAP:
+ * The Kinematic one might be able to not detect collisions
+ * Make upacking function
+ * Display of angles
+ * Display of volume
  * 
- * TODO LIST
- * Hinge axis is tracking correctly issue is with altParentTracker being created too late and then being in the wrong place
- * I will have all the hinges done from the corner I just need to just fix the axis to rotate around
  * @Author Phillip MIller
  * @Date 6/21/2021
  */
@@ -56,10 +60,6 @@ class Edge //vertex should be a world vertex
     public override string ToString()
     {
         return base.ToString() + this.vertex1.ToString() + this.vertex2.ToString();
-    }
-    public void Draw()
-    {
-        Debug.DrawLine(vertex1, vertex2, Color.red, 50f);
     }
 }
 class Triangle : IEnumerable<Edge>
@@ -119,7 +119,8 @@ class Polygon : IEnumerable
     private List<Vector3> Vertices = new List<Vector3>(); 
     public List<Edge> EdgeList = new List<Edge>();
     private List<Triangle> TriangleList = new List<Triangle>();
-    
+    public Vector3 extrudeDirection;
+    public int numTriangles;
 
     public Polygon(List<Triangle> triangles)
     {
@@ -176,18 +177,6 @@ class Polygon : IEnumerable
         }
         return area;
     }
-    public Vector3 getMiddle()
-    {
-        var verts = this.getVerticies();
-        Vector3 avg = Vector3.zero;
-
-        foreach(Vector3 vert in verts)
-        {
-            avg += vert;
-        }
-        avg /= verts.Count;
-        return avg;
-    }
     public IEnumerator GetEnumerator()
     {
         return EdgeList.GetEnumerator();
@@ -196,865 +185,114 @@ class Polygon : IEnumerable
     {
         return GetEnumerator();
     }
-
-    public override bool Equals(object obj) 
-    {
-        Polygon p = (Polygon) obj;
-        return this.getVerticies().All(p.getVerticies().Contains) && this.getVerticies().Count == p.getVerticies().Count; 
-    }
-
-    public override int GetHashCode()
-    {
-        return base.GetHashCode();
-    }
-
-    public override string ToString()
-    {
-        return base.ToString();
-    }
-    public void Draw()
-    {
-        foreach(Edge edge in EdgeList){
-            edge.Draw();
-        }
-    }
-}
-class MyHinge //everything in here is in world space !! 
-    //hinge normal 1 and 2 will be continously updated as go1, and go2 are rotated respectively
-{
-    public readonly Vector3 origin;
-    public readonly Polygon polygon1;
-    public readonly Polygon polygon2;
-    public readonly Vector3 moveDirection;
-    
-
-    //Updated during runtime
-    public Vector3 axis;
-    public Vector3 anchor;
-    public Vector3 axisPointA;
-    public Vector3 axisPointB;
-    public Vector3 orthogonalV1;
-    public Vector3 orthogonalV2;
-    public List<MyHinge> connectedHinges = new List<MyHinge>();
-    public Vector3 normalToCenter1;
-    
-    public Vector3 normalToCenter2;
-
-    public static List<Polygon> lockedFaces = new List<Polygon>();
-    public GameObject go1;
-    public GameObject go2;
-
-    public float updatedAngle;
-    
-    public MyHinge(Polygon Polygon1, Polygon Polygon2,Vector3 axisPointA, Vector3 axisPointB)
-    {
-        polygon1 = Polygon1;
-        polygon2 = Polygon2;
-        this.go1 = Polygon1.EdgeList[0].go;
-        this.go2 = Polygon2.EdgeList[0].go;
-        this.axis = axisPointA - axisPointB; //should I actually be subtracting here
-        this.anchor = (axisPointA + axisPointB) / 2;
-        this.origin = this.anchor;
-        this.axisPointA = axisPointA;
-        this.axisPointB = axisPointB;
-        calculateOrthogonalHinge();
-        this.updatedAngle = this.GetAngle();
-        this.moveDirection = ((orthogonalV1 + orthogonalV2) / 2).normalized;
-    }
-    public void updateGo()
-    {
-        this.go1 = polygon1.EdgeList[0].go;
-        this.go2 = polygon2.EdgeList[0].go;
-
-    }
-    /// <summary>
-    /// in order to rotate to rotate around someone elses anchor.
-    /// Only works for one alternate anchor, assuming further uses want the same anchor
-    /// this will be the outermost parent altTrackingParent,TrackingParent,GameObject
-    ///@FIXME make sure to run normal getTranslateParent Before hand
-    /// </summary>
-    /// <param name="firstGo"></param>
-    /// <param name="altAnchor"></param> anchor of another game object you wish to rotate around 
-    /// <returns></returns>
-    private GameObject GetTranslateParent(bool firstGo, Vector3 altAnchor)
-    {
-        
-        GameObject child;
-        if (firstGo)
-        {
-            if (this.go1.transform.parent != null && this.go1.transform.parent.name.Equals("AltTrackingParent"))
-            { 
-                return this.go1.transform.parent.gameObject;
-            }
-            child = this.go1;
-        }
-        else
-        {
-            if (this.go2.transform.parent != null && this.go2.transform.parent.name.Equals("AltTrackingParent"))
-                return this.go2.transform.parent.gameObject;
-            child = this.go2;
-        }
-        GameObject parent = new GameObject("AltTrackingParent");
-        parent.transform.Translate(altAnchor);
-        child.transform.parent = parent.transform;
-        return parent; 
-    }
-    private GameObject GetTranslateParent(bool firstGo) 
-    {
-
-        GameObject child;
-        GameObject oldParent;
-        if (this.go1.transform.parent != null && !this.go1.transform.parent.name.Contains("Parent") )
-        {
-            oldParent = this.go1.transform.parent.gameObject;
-            this.go1.transform.parent = null;
-            GameObject.Destroy(oldParent);
-        }
-        if (this.go2.transform.parent != null && !this.go2.transform.parent.name.Contains("Parent"))
-        {
-            oldParent = this.go2.transform.parent.gameObject;
-            this.go2.transform.parent = null;
-            GameObject.Destroy(oldParent);
-        }
-        if (firstGo)
-        {
-            if (this.go1.transform.parent != null) {
-                return this.go1.transform.parent.gameObject;
-            }
-            child = this.go1;
-
-        }
-        else 
-        {
-            if (this.go2.transform.parent != null)
-            {
-                return this.go2.transform.parent.gameObject;
-            }
-                child = this.go2;
-        }
-        GameObject parent = new GameObject("TrackingParent");
-        //GameObject parent = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        //parent.name = "TrackingParent";
-        //parent.transform.localScale = .2f * Vector3.one;
-        parent.transform.Translate(this.anchor);
-        child.transform.parent = parent.transform;
-        return parent;
-        
-    }
-    private void calculateOrthogonalHinge() //want to find orthogonal line between axis and point on polygon. Might want to calculate the axis inside of this function
-    {
-        this.orthogonalV1 = this.polygon1.getMiddle() - this.anchor;
-        this.orthogonalV2 = this.polygon2.getMiddle() - this.anchor;
-     
-       
-    }
-
-    private float GetAngle()
-    {
-        
-        double magAxB = orthogonalV1.magnitude * orthogonalV2.magnitude;
-        double dotProduct = Vector3.Dot(orthogonalV1, orthogonalV2);
-        //Vector3.SignedAngle(orthogonalV1, orthogonalV2); has weird result where it will always return value less than 180
-        return (float)(Math.Acos((dotProduct / magAxB)) * (180 / Math.PI));
-    }
-    public override bool Equals(object obj)
-    {
-        MyHinge other = (MyHinge)obj; //sees if the anchor is the same
-        if (this.anchor.Equals(other.anchor))
-            return true;
-        return false;
-    }
-    public bool sharesPolygon(MyHinge hinge)
-    {
-       
-        return this.polygon1.Equals(hinge.polygon1) || this.polygon1.Equals(hinge.polygon2) || this.polygon2.Equals(hinge.polygon1) || this.polygon2.Equals(hinge.polygon2);
-    }
-    /// <summary>
-    /// Moves GO's, updates 
-    /// </summary>
-    /// <param name="rad"></param>
-    public float updateAngle(float deg) //need to adjust the flaps here too...locked faces not really used
-    {
-        this.updatedAngle += deg;
-
-        if (lockedFaces.Contains(this.polygon1))
-        {
-            RotateAroundPivot(false, deg);
-        }
-        else if (lockedFaces.Contains(this.polygon2))
-        {
-            RotateAroundPivot(true, deg);
-        }
-        else
-        {
-            
-            RotateAroundPivot(true, deg/2);
-            RotateAroundPivot(false,-1*deg/2);
-        }
-        return this.updatedAngle;
-    }
-    
-
-    private void RotateAroundPivot(bool firstGo, float deg, bool updateValueOnly = false) 
-    {
-        //IF FLAP THEN ROTATE AROUND PREEXISTING PARENT (alt parent) instead of triny to create a new one @FIXME is using wrong translate parent causing issues?
-        
-        GameObject parent = this.GetTranslateParent(firstGo);
-        parent.transform.Rotate(this.axis, deg);
-        Quaternion rotation = Quaternion.AngleAxis(-deg, this.axis);
-        
-       
-        //zfighting
-        if (firstGo)
-        {
-            this.normalToCenter1 = rotation.normalized * this.normalToCenter1;
-        }
-        if (!firstGo)
-        {
-            this.normalToCenter2 = rotation.normalized * this.normalToCenter2;
-        }
-        //DrawNormalToCenters();
-
-        if ((this.go1.name.Contains("abcd") || this.go2.name.Contains("abcd")) && firstGo) //added first go to make sure this only gets executed one time
-        {
-            foreach (MyHinge hinge in this.connectedHinges)
-            {
-                
-                bool FlapIsFirstGo = !this.go1.name.Contains("abcd"); //we want to move the non abcd face (flapA and flapB)
-                hinge.GetTranslateParent(FlapIsFirstGo, this.anchor).transform.Rotate(this.axis, -deg); //want to update axisPointA,AxisPointB and then recalculate anchor as well
-                //hinge.axisPointA = rotation.normalized * hinge.axisPointA;
-                //hinge.axisPointB = rotation.normalized * hinge.axisPointB;
-                //hinge.axis = rotation.normalized * hinge.axis;
-                //hinge.anchor = (hinge.axisPointA + hinge.axisPointB) / 2;
-                if (FlapIsFirstGo) //update ortho
-                {
-                    hinge.orthogonalV1 = rotation.normalized * hinge.orthogonalV1; //order matters 
-                }
-                else
-                {
-                    hinge.orthogonalV2 = rotation.normalized * hinge.orthogonalV2; //order matters 
-                }
-
-            }
-        }
-
-        if (firstGo) //update ortho
-        {
-            orthogonalV1 = rotation.normalized * orthogonalV1; //order matters 
-        }
-        else
-        {
-            orthogonalV2 = rotation.normalized * orthogonalV1; //order matters 
-        }
-
-        
-
-    }
-    public void TranslateHinge(float dX, bool updateValueOnly) //@FIXME this is where i am messing up the axis
-    {
-        dX *= -1;
-        orthogonalV1 += ((orthogonalV1 + orthogonalV2) / 2).normalized * dX; 
-        orthogonalV2 += ((orthogonalV2 + orthogonalV2) / 2).normalized * dX;
-        
-        this.axisPointA += this.moveDirection * dX;
-        this.axisPointB += this.moveDirection * dX;
-        this.axis = this.axisPointA - this.axisPointB; 
-        this.anchor = (this.axisPointA + this.axisPointB) / 2;
-
-        if (updateValueOnly)
-            return;
-        this.GetTranslateParent(true).transform.Translate(this.moveDirection * dX, Space.World);
-        this.GetTranslateParent(false).transform.Translate(this.moveDirection * dX, Space.World);
-        if (this.go1.name.Contains("a") || this.go2.name.Contains("a"))
-        { //then we will have to adjust other hinges
-
-            foreach (MyHinge hinge in this.connectedHinges)
-            {
-                
-                //if we are adjusting hinge c 
-                //orthogonalV1 += this.moveDirection * dX;
-                //orthogonalV2 += this.moveDirection * dX;
-                //hinge.axisPointA += (this.moveDirection * dX);
-                //hinge.axisPointB += (this.moveDirection * dX);
-                //hinge.axis = hinge.axisPointA - hinge.axisPointB; //should I actually be subtracting here @FIXME @FIXME @FIXME
-                //hinge.anchor = (hinge.axisPointA + hinge.axisPointB) / 2;
-                bool first = !hinge.go1.name.Equals("abcd");
-                hinge.GetTranslateParent(first,this.anchor).transform.Translate(this.moveDirection * dX, Space.World);
-            }
-            
-        }
-    }
-
-    /// <summary>
-    /// Draws in green
-    /// </summary>
-    public void Draw() //need to update these points more often
-    {
-        Debug.DrawLine(axisPointA, axisPointB, Color.green, 1f);
-    }
-    /// <summary>
-    /// Draws the Normal to Center Ray
-    /// </summary>
-    /// <param name="go"></param> 0 means to draw both, 1/2 will specify which game object to draw
-    public void DrawNormalToCenters(int go = 0)
-    {
-        if (go == 0)
-        {
-            Debug.DrawLine(this.polygon1.getMiddle(), normalToCenter1, Color.yellow, 50f);
-            Debug.DrawLine(this.polygon2.getMiddle(), normalToCenter2, Color.yellow, 50f);
-        }
-        if (go == 1)
-        {
-            Debug.DrawLine(this.polygon1.getMiddle(), normalToCenter1, Color.yellow, 50f);
-        }
-        if (go == 2)
-        {
-            Debug.DrawLine(this.polygon2.getMiddle(), normalToCenter2, Color.yellow, 50f);
-        }
-    }
-    /// <summary>
-    /// Designed for use specefically in updating the values of the axis for the flaps to rotate around
-    /// </summary>
-    /// <param name="axisPointA"></param>
-    /// <param name="axisPointB"></param>
-    public void updateFromAxisPoints(Vector3 axisPointA, Vector3 axisPointB)
-    {
-        this.axisPointA = axisPointA;
-        this.axisPointB = axisPointB;
-        this.anchor = (axisPointA + axisPointB) / 2;
-        this.axis = axisPointA - axisPointB;
-    }
-
-    public override int GetHashCode()
-    {
-        return base.GetHashCode();
-    }
-
-    public override string ToString()
-    {
-        return base.ToString();
-    }
 }
 
 public class MyScript : MonoBehaviour
 {
-    List<MyHinge> uniqueHinges;
+    List<HingeJoint> uniqueHinges = new List<HingeJoint>();
     private GameObject parentModel;
     public bool autoUnpack;
-    public bool useGravity;
-    public float userAngleD;
-    public float userAngleC;
-    public float userAngleA;
-    public float userAngleB;
-
-    private double hingeTolerance = .001;
+    public bool useGravity; 
+    public double hingeTolerance; //TODO: could calculate this as something to do with the width of the shapes imported
     public double sideArea;
+    private bool hideColliders = true;
+    private bool hideOutside = false;
+    public bool updateHingeMotion;
 
-    private double squareLength;
-    List<GameObject> hiddenGo = new List<GameObject>();
-    GameObject[] allGameObj;
-    List<MyHinge> interiorHinges = new List<MyHinge>();
-    List<MyHinge> DandOppHinges = new List<MyHinge>();
-    MyHinge hingeA;
-    MyHinge hingeB;
-    MyHinge hingeC;
-    MyHinge hingeD;
-    GameObject faceA;
-    GameObject faceB;
-    GameObject faceC;
-    GameObject faceDandOpp;
-    GameObject faceABCD;
-    GameObject faceOpp;
-    GameObject AaxisPoint1;
-    GameObject AaxisPoint2;
-    GameObject BaxisPoint1;
-    GameObject BaxisPoint2;
+    private List<GameObject> ColliderGoList;
 
-    public float Z_DISPLACEMENT;
-
-    List<GameObject> myStack1 = new List<GameObject>(); //the stack that the flaps can be added to (abcd to center)
-    List<GameObject> myStack2 = new List<GameObject>();
-    List<GameObject> prevMyStack1 = new List<GameObject>();
-    List<GameObject> prevMyStack2 = new List<GameObject>();
-
-    Vector3 stack1UpVector; //also known as abcdToCenter
-    Vector3 stack2UpVector;
-    Vector3 prevStack1UpVector = Vector3.zero;
-    Vector3 prevStack2UpVector = Vector3.zero;
     [System.NonSerialized]
     public bool gameObjectDestroyed;
 
-
-
     void Start()
     {
-        //myPlygon changes go but hinges are made before that....
+        //Physics settings
+        Physics.defaultSolverIterations = 60;
+        Time.maximumDeltaTime = 5; //seconds
+        Time.fixedDeltaTime = 0.001F;
+        Physics.defaultContactOffset = .05F; //default is .01
 
         parentModel = this.gameObject;
-        allGameObj = FindAllGameObjects(); //find and curate list of all viewable faces
-        List<Polygon> myPolygons = FindFacePolygons(allGameObj, null);//finds all outside edges of shape using shared edges and area methods
-        List<Edge[]> matchingEdges = FindMatchingEdges(ref myPolygons); //edits ref myPolygons to just the inner polygons by finding the matching edges
-        foreach (GameObject go in allGameObj)
-            go.transform.parent = null;
-        ReSizeShape(ref myPolygons);
-        foreach (MyHinge hinge in uniqueHinges)
+        GameObject[] allGameObj = FindAllGameObjects(); //find and curate list of all viewable faces
+        GameObject [] allColliderGameObjects = new GameObject[allGameObj.Length]; //empty list of colliders that the allGameObj will be parented under
+        ConfigureGameObjects(allGameObj,true);//Randomly assigns colour
+        List<Polygon> myPolygons = FindFacePolygons(allGameObj,null);//finds all outside edges of shape using shared edges and area methods
+        FindMatchingEdges(ref myPolygons); //edits ref myPolygons to just the inner polygons by finding the matching edges
+
+        CreateColliderPlanes(ref myPolygons); //Create my collider planes from the myPolygons and reassigns the game object attached to my polygon
+        for (int i = 0; i < myPolygons.Count; i++)
         {
-            hinge.updateGo();
+            allColliderGameObjects[i] = myPolygons[i].EdgeList[0].go;
+        } //filling up the allColliderGameObject list
+        ConfigureGameObjects(allColliderGameObjects,false); //configure but for physics system, no colouring (could change this to include coloring)
+        
+        myPolygons = FindFacePolygons(allColliderGameObjects,myPolygons); //@fixme need help for when each shape has different number of sides. @TODO:
+        List<Edge[]> matchingEdges = FindMatchingEdges(ref myPolygons); //@FIXME somehow this is not working on the second iteration
+        CreateHingeJoints(matchingEdges); 
+        
+        foreach(GameObject go in allColliderGameObjects) //bool hide colliders
+        {
+            go.GetComponent<MeshRenderer>().forceRenderingOff = hideColliders;
         }
+        foreach (GameObject go in allGameObj)  //bool hide faces
+        {
+            go.SetActive(!hideOutside);
+        }
+        print("Number of face colliders detected: " + allColliderGameObjects.Length);
+        print("Number of hinges: " + matchingEdges.Count);
+        print(myPolygons[0].EdgeList.Count + "-gon");
+
+        ColliderGoList = new List<GameObject>(allColliderGameObjects);
+        gameObjectDestroyed = false;
+        CreateLabels(); //Label Angles, Shapes, and Have an array of angles thats updated each frame @TODO:
         
 
-
-
-        squareLength = ((uniqueHinges[0].axisPointA - uniqueHinges[0].axisPointB).magnitude);
-
-        Time.fixedDeltaTime = 0.01f;
-        //c and angle across from it
-        hingeC = uniqueHinges.Where(hinge => hinge.go1.name.Contains("c") && hinge.go2.name.Contains("c")).First(); //hopefully there is only 1
-        hingeA = uniqueHinges.Where(hinge => hinge.go1.name.Contains("a") && hinge.go2.name.Contains("a")).First();
-        hingeB = uniqueHinges.Where(hinge => hinge.go1.name.Contains("b") && hinge.go2.name.Contains("b")).First();
-        hingeD = uniqueHinges.Where(hinge => hinge.go1.name.Contains("d") && hinge.go2.name.Contains("d")).First();
-
-        interiorHinges.Add(hingeC);
-        foreach (MyHinge hinge in uniqueHinges)
+    }
+    void Update()
+    {
+        if (gameObjectDestroyed)
         {
-            if (hinge.go1.name.Contains("opp") && hinge.go2.name.Contains("opp")) //helper hinge...not getting triggered
+            gameObjectDestroyed = true;
+            for (int i = 0; i < ColliderGoList.Count; i++)
             {
-                interiorHinges.Add(hinge);
-            }
-        }
 
-        DandOppHinges.Add(hingeD);
-        foreach (MyHinge hinge in uniqueHinges)
-        {
-            if (hinge.go1.name.Equals("opp") && hinge.go2.name.Equals("c") || hinge.go1.name.Equals("c") && hinge.go2.name.Equals("opp")) //helper hinge...not getting triggered
-            {
-                DandOppHinges.Add(hinge);
-            }
-        }
-        hingeC.connectedHinges.Add(hingeA);
-        hingeC.connectedHinges.Add(hingeB);
-
-        faceA = allGameObj.Where(go => go.name.Equals("a")).First();
-        faceB = allGameObj.Where(go => go.name.Equals("b")).First();
-        faceC = allGameObj.Where(go => go.name.Equals("c")).First();
-        faceDandOpp = allGameObj.Where(go => go.name.Equals("d&opp")).First();
-        faceABCD = allGameObj.Where(go => go.name.Equals("abcd")).First();
-        faceOpp = allGameObj.Where(go => go.name.Equals("opp")).First();
-
-        findNormals();
-
-        AaxisPoint1 = new GameObject("AaxisPoint1");
-        AaxisPoint2 = new GameObject("AaxisPoint2");
-        BaxisPoint1 = new GameObject("BaxisPoint1");
-        BaxisPoint2 = new GameObject("BaxisPoint2");
-
-        AaxisPoint1.transform.Translate(hingeA.axisPointA);
-        AaxisPoint2.transform.Translate(hingeA.axisPointB);
-        BaxisPoint1.transform.Translate(hingeB.axisPointA);
-        BaxisPoint2.transform.Translate(hingeB.axisPointB);
-
-        AaxisPoint1.transform.SetParent(faceABCD.transform);
-        AaxisPoint2.transform.SetParent(faceABCD.transform);
-        BaxisPoint1.transform.SetParent(faceABCD.transform);
-        BaxisPoint2.transform.SetParent(faceABCD.transform);
-                                        
-
-
-
-        //I want to attach axisA and axisB to face abcd and then I can just track that and update it in the fixed update
-        //UpdateAngleA(userAngleA - flapA.updatedAngle);
-        //UpdateAngleB(userAngleB - flapB.updatedAngle);
-        //UpdateAngleC(userAngleC - hingeC.updatedAngle); //pass in a delta
-        //UpdateAngleD((360 - userAngleD) - hingeD.updatedAngle);
-        //UpdateAngleD(-hingeD.updatedAngle);
-    }
-    String stackPrint(List<GameObject> myStack)
-    {
-        String returnString = "";
-        foreach(GameObject go in myStack)
-        {
-            returnString += go.name + " < ";
-        }
-        return returnString;
-    }
-    private void Update()
-    {
-        hingeA.updateFromAxisPoints(AaxisPoint1.transform.position, AaxisPoint2.transform.position);
-        hingeB.updateFromAxisPoints(BaxisPoint1.transform.position, BaxisPoint2.transform.position);
-
-    }
-
-    void FixedUpdate() //update commands are all in deltas (how much you want them to move)
-    {
-        
-        if(myStack1.Count > 1)
-            print(stackPrint(myStack1));
-        Debug.DrawRay(hingeA.anchor, hingeA.axis, Color.cyan, 1f);
-        //zOffset();
-
-
-
-    }
-    public float UpdateAngleA(float deg)
-    {
-
-        float returnAngle = UpdateFlap(deg, hingeA);
-        if(hingeA.updatedAngle < 1)
-        {
-            if (!myStack1.Contains(faceA))
-                myStack1.Insert(0, faceA);
-        }
-        if (hingeA.updatedAngle > 359)
-        {
-            if (!myStack1.Contains(faceA))
-                myStack1.Add(faceA);
-        }
-        else
-            myStack1.Remove(faceA);
-        return returnAngle;
-    }
-    public float UpdateAngleB(float deg)
-    {
-        float returnAngle = UpdateFlap( deg, hingeB);
-        if (hingeB.updatedAngle < 1)
-        {
-            if (!myStack1.Contains(faceB))
-                myStack1.Insert(0, faceB);
-        }
-        if (hingeB.updatedAngle > 359)
-        {
-            if (!myStack1.Contains(faceB))
-                myStack1.Add(faceB);
-        }
-        else
-            myStack1.Remove(faceB);
-        return returnAngle;
-    }
-    private float UpdateFlap(float deg, MyHinge hinge)
-    {
-        if (hinge.updatedAngle + deg > 360)
-        {
-            
-            deg = 360 - hinge.updatedAngle;
-        }
-        if (hinge.updatedAngle + deg < 0)
-        {
-            deg = 0 - hinge.updatedAngle;
-        }
-        //figure out which side
-        if (hinge.go1.name.Equals("abcd"))
-            MyHinge.lockedFaces.Add(hinge.polygon1);
-        else
-            MyHinge.lockedFaces.Add(hinge.polygon2);
-        Debug.DrawRay(hinge.anchor, hinge.axis, Color.green, 1f);
-
-        float returnAngle = hinge.updateAngle(deg);
-        MyHinge.lockedFaces.RemoveAt(MyHinge.lockedFaces.Count - 1); //removes the polyygon we just added
-        return returnAngle;
-    }
-    public float UpdateAngleD(float deg)
-    {
-        
-        if (hingeC.updatedAngle > 180)
-        {
-            Debug.Log("D Bound Condition");
-            //hingeC.updateAngle(-deg);
-            //interiorHinges[1].updateAngle(deg);
-        }
-        if (hingeC.updatedAngle == 0)//@FIXME need to track DandOpp[1] here and adjust hinge location
-        {
-            //Iff deg is pos that means opp will be on top
-            //neg deg means c will be on top
-            foreach(MyHinge hinge in DandOppHinges) //wnat to lock c and abcd
-            {
-                if (hinge.go1.name.Contains("c"))
-                    MyHinge.lockedFaces.Add(hinge.polygon1);
-                if (hinge.go2.name.Contains("c"))
-                    MyHinge.lockedFaces.Add(hinge.polygon2);
-            }
-            hingeD.updateAngle(deg);
-            DandOppHinges[1].updateAngle(deg);
-            MyHinge.lockedFaces.Clear();
-
-           
-        }
-        else //otherwise d is directly dependent on C
-        {
-            UpdateAngleC(-deg);
-        }
-
-        if (hingeD.updatedAngle < 1)
-        {
-            if (!myStack1.Contains(faceOpp) && !myStack1.Contains(faceDandOpp))
-            {
-                myStack1.Insert(0, faceOpp);
-                myStack1.Insert(0, faceDandOpp);
-            }
-        }
-        if (hingeD.updatedAngle > 359)
-        {
-            if (!myStack1.Contains(faceOpp) && !myStack1.Contains(faceDandOpp))
-            {
-                myStack1.Add( faceDandOpp);
-                myStack1.Add(faceOpp);
-            }
-        }
-        else
-        {
-            myStack2.Clear();
-            myStack1.Remove(faceOpp);
-            myStack1.Remove(faceDandOpp);
-        }
-        return hingeD.updatedAngle;
-    }
-
-    public float UpdateAngleC(float deg) //distance apart is length*cos(pheta/2)-> dX/dPheta = length*-sin(pheta/2) *.5
-                                  //double translateAmmount = -1* (-.5 * squareLength * Math.Sin(Mathf.Deg2Rad*1*deg/2));
-                                 //I will have interior angles[0] always be c
-    {
-        
-        float angleC = hingeC.updatedAngle;
-        if ((angleC == 0 && deg < 0) || (angleC == 360 && deg > 0)) //cant move
-            return 0;
-        if (angleC + deg < 0) //snap to 0
-        {
-            print("BOUND CONDITION 1");
-            deg = 0 - angleC;
-        }
-        if(angleC + deg > 360) //snap to 360
-        {
-            print("BOUND CONDITION 2");
-            deg = 360 - angleC;
-        }
-        if (angleC >= 180) // @ fixme need to track dandopp[1]
-        {
-            hingeC.updateAngle(deg);
-            interiorHinges[1].updateAngle(-deg);
-        }
-        else
-        {
-            if (angleC + deg > 180) //only doing one type of movement at a time
-                deg = 180 - angleC;
-
-            
-
-            foreach (MyHinge hinge in interiorHinges)
-            {
-                hinge.updateAngle(deg);
-                float dX = (float)(squareLength * Math.Cos(Mathf.Deg2Rad * hinge.updatedAngle / 2)) - (float)(squareLength * Math.Cos(Mathf.Deg2Rad * (hinge.updatedAngle - deg) / 2));
-                if (angleC > 0 && angleC < 180) //might be an unncesary if statement
+                try
                 {
-                   hinge.TranslateHinge(dX, false);
-
+                    var rb = ColliderGoList[i].GetComponent<Rigidbody>();
+                }
+                catch (Exception)
+                {
+                    ColliderGoList.RemoveAt(i);
+                    if (ColliderGoList.Count != 0) {
+                        ColliderGoList[0].GetComponent<Rigidbody>().collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+                        ColliderGoList[0].GetComponent<Rigidbody>().isKinematic = true;
+                    }
+                    break;
                 }
             }
-            foreach (MyHinge hinge in DandOppHinges)
+        }
+
+
+
+        float [] previousHinges = new float[uniqueHinges.Count];
+        if (updateHingeMotion)
+        {
+            for(int i = 0; i<uniqueHinges.Count; i++)
             {
-                float dX = (float)(squareLength * Math.Cos(Mathf.Deg2Rad * hinge.updatedAngle / 2)) - (float)(squareLength * Math.Cos(Mathf.Deg2Rad * (hinge.updatedAngle - deg) / 2));
-                if (angleC > 0 && angleC < 180)
-                {
-                    hinge.TranslateHinge(-dX, true);
-                }
+                HingeJoint hinge = uniqueHinges[i];
+                print("AngleDelta: "+  Math.Abs(hinge.angle - previousHinges[i])); ;
+                previousHinges[i] = hinge.angle;
             }
-            float adjAngle = 180 - hingeC.updatedAngle; 
-            hingeD.updatedAngle = adjAngle;
-            DandOppHinges[1].updatedAngle = adjAngle;
-        }       
+        }
         
-        if(hingeC.updatedAngle > 359 && !myStack1.Contains(faceC) && !myStack1.Contains(faceOpp))
-        {
-            if (!myStack1.Contains(faceDandOpp) && !myStack1.Contains(faceABCD))
-            {
-                myStack1.Clear();
-                myStack1.Add(faceDandOpp);
-                myStack1.Add(faceABCD);
-            }
-
-            myStack2.Clear();
-            myStack1.Add(faceC);
-            myStack1.Add(faceOpp);
-            
-        }
-        if(hingeC.updatedAngle < 359 && hingeC.updatedAngle > 179 && !myStack2.Contains(faceOpp)) //180 usecase
-        {
-            myStack2.Clear();
-            myStack2.Add(faceOpp);
-            myStack2.Add(faceC);
-
-            if (!myStack1.Contains(faceDandOpp))
-                myStack1.Insert(0, faceDandOpp);
-            if (!myStack1.Contains(faceABCD))
-                myStack1.Add(faceABCD);
-
-        }
-        if ( hingeC.updatedAngle < 1)
-        {
-            if(!myStack1.Contains(faceC))
-                myStack1.Insert(0,faceC);
-            if (!myStack1.Contains(faceABCD))
-                myStack1.Add(faceABCD);
-            if (hingeD.updatedAngle < 1 && !myStack1.Contains(faceDandOpp) && !myStack1.Contains(faceOpp))
-            {
-                myStack1.Insert(0, faceOpp);
-                myStack1.Insert(0, faceDandOpp);
-            }
-            else if(!myStack1.Contains(faceC) && !myStack2.Contains(faceOpp))
-            {
-                //stack1 needs to add c
-                myStack2.Clear();
-                myStack2.Add(faceOpp);
-                myStack2.Add(faceDandOpp);
-               
-            }
-        }
-        if(hingeC.updatedAngle>1 && hingeC.updatedAngle < 180)
-        {
-            myStack2.Clear();
-            myStack1.RemoveAll(go => go != faceA && go != faceB && go != faceABCD);
-        }
-        if (hingeC.go1.Equals(faceABCD))
-            stack1UpVector = hingeC.normalToCenter1;
-        if (hingeC.go2.Equals(faceABCD))
-            stack1UpVector = hingeC.normalToCenter2;
-        return hingeC.updatedAngle;
-    }
-    /// <summary>
-    /// Given the order of the stacks I need to move the elements at the top of the stack and the bottom of the stack apart from eachother ever so slightly
-    /// TODO: make middle ones invisible in bigger stacks if needed
-    /// </summary>
-    public Boolean zOffset() //I think this is causing issues in the rotation
-    {
-
-        if (hingeC.updatedAngle > 90)
-        {
-            stack2UpVector = hingeC.go1.Equals(faceC) ? hingeC.normalToCenter1 : hingeC.normalToCenter2;
-        }
-        if (hingeC.updatedAngle < 90)
-        {
-            stack2UpVector = interiorHinges[1].go1.Equals(faceDandOpp) ? interiorHinges[1].normalToCenter1 : interiorHinges[1].normalToCenter2;
-        }
-
-        ///attach parents and fix that kind of stuff up
-        if (myStack1 != null && myStack1.Count > 1)
-        {
-            if (!prevMyStack1.SequenceEqual(myStack1))
-            {
-                Debug.Log("STACK CHANGE");
-                prevMyStack1[0].transform.Translate(-prevStack1UpVector.normalized * Z_DISPLACEMENT, Space.World);
-                prevMyStack1[prevMyStack1.Count -1].transform.Translate(prevStack1UpVector.normalized * Z_DISPLACEMENT, Space.World);
-                prevStack1UpVector = Vector3.zero; //gotta make sure it moves foward first
-
-            }
-            myStack1[0].transform.Translate(-prevStack1UpVector.normalized * Z_DISPLACEMENT, Space.World);
-            myStack1[myStack1.Count-1].transform.Translate(prevStack1UpVector.normalized * Z_DISPLACEMENT, Space.World);
-
-            myStack1[0].transform.Translate(stack1UpVector.normalized * Z_DISPLACEMENT , Space.World);
-            myStack1[myStack1.Count - 1].transform.Translate(-stack1UpVector.normalized * Z_DISPLACEMENT, Space.World);
-
-            prevStack1UpVector = stack1UpVector;
-
-        }
-        prevMyStack1.Clear();
-        foreach (GameObject go in myStack1)
-        {
-            prevMyStack1.Add(go);
-        }
-
-        if(myStack2 != null && myStack2.Count > 1)
-        {
-            if (!prevMyStack1.SequenceEqual(myStack1))
-            {
-                Debug.Log("STACK CHANGE");
-                prevMyStack2[0].transform.Translate(-prevStack2UpVector.normalized * Z_DISPLACEMENT, Space.World);
-                prevMyStack2[prevMyStack2.Count - 1].transform.Translate(prevStack2UpVector.normalized * Z_DISPLACEMENT, Space.World);
-                prevStack2UpVector = Vector3.zero; //gotta make sure it moves foward first
-
-            }
-            myStack2[0].transform.Translate(-prevStack2UpVector.normalized * Z_DISPLACEMENT, Space.World);
-            myStack2[myStack1.Count - 1].transform.Translate(prevStack2UpVector.normalized * Z_DISPLACEMENT, Space.World);
-
-            myStack2[0].transform.Translate(stack2UpVector.normalized * Z_DISPLACEMENT, Space.World);
-            myStack2[myStack2.Count - 1].transform.Translate(-stack2UpVector.normalized * Z_DISPLACEMENT, Space.World);
-
-            prevStack2UpVector = stack2UpVector;
-        }
-
-        if(myStack1.Count > 2) //hide middle stuff
-            for (int i = 0; i < myStack1.Count; i++)
-            {
-                if (i != 0 && i != myStack1.Count - 1)
-                {
-                    myStack1[i].GetComponent<MeshRenderer>().enabled = false;
-                    hiddenGo.Add(myStack1[i]);
-                }
-            }
-        else
-        {
-            foreach(GameObject go in hiddenGo)
-            {
-                go.GetComponent<MeshRenderer>().enabled = true;
-            }
-            hiddenGo.Clear();
-
-        }
-        return true;
-    
-        
-    }
-    void findNormals()
-    {
-
-        Vector3[] faceCenters = new Vector3[4]; //(same order as below)
-        
-        GameObject[] square = { faceC, faceOpp, faceDandOpp, faceABCD };
-        List<Vector3> allVerticies = new List<Vector3>();
-        for(int i = 0; i<square.Length; i++)
-        {
-            GameObject go = square[i];
-            List<Vector3> myVerticies = new List<Vector3>();
-            go.GetComponent<MeshFilter>().mesh.GetVertices(myVerticies);
-            Vector3 faceCenter = Vector3.zero;
-            foreach (Vector3 v in myVerticies) {
-                allVerticies.Add(go.transform.TransformPoint(v));
-                faceCenter += go.transform.TransformPoint(v);
-            }
-            faceCenters[i] = faceCenter / myVerticies.Count;
-        }
-        Vector3 interior = Vector3.zero;
-        foreach (Vector3 v in allVerticies)
-        {
-            interior += v;
-        }
-        interior /= allVerticies.Count;
-
-     
-        Vector3 abcdToCenter = interior - faceCenters[3];
-        Vector3 dandOppToCenter = interior - faceCenters[2];
-        Vector3 cToCenter = interior - faceCenters[0];
-
-        if (hingeC.go1.name.Equals("abcd"))
-            hingeC.normalToCenter1 = abcdToCenter;
-        if (hingeC.go2.name.Equals("abcd"))
-            hingeC.normalToCenter2 = abcdToCenter;
-        if(interiorHinges[1].go1.name.Equals("d&opp"))
-            interiorHinges[1].normalToCenter1 = dandOppToCenter;
-        if (interiorHinges[1].go2.name.Equals("d&opp"))
-            interiorHinges[1].normalToCenter2 = dandOppToCenter;
-        if (hingeC.go1.name.Equals("c"))
-            hingeC.normalToCenter1 = cToCenter;
-        if (hingeC.go2.name.Equals("c"))
-            hingeC.normalToCenter2 = cToCenter;
-
 
     }
-
-
     /// <summary>
     ///Returns a list of all game objects under the parented object <parentModel> (parent object not included)
     /// </summary>
     GameObject[] FindAllGameObjects()
     {
-        //TODO: autounpack doesnt appear to be working any more
+        
         GameObject[] gameObjectArray = new GameObject[parentModel.transform.childCount];
         if (!autoUnpack)
         {
@@ -1063,7 +301,6 @@ public class MyScript : MonoBehaviour
                 GameObject child = parentModel.transform.GetChild(i).gameObject;
                 gameObjectArray[i] = child;
             }
-
             return gameObjectArray;
         }
 
@@ -1072,7 +309,6 @@ public class MyScript : MonoBehaviour
         for (int i = 0; i < childCount; i++)
         {
             gameObjectArray[i] = parentModel.transform.GetChild(i).transform.GetChild(0).transform.GetChild(0).gameObject;
-            
         }
         return gameObjectArray;
         
@@ -1081,19 +317,69 @@ public class MyScript : MonoBehaviour
     /// applies ridgid body, enables is kinematic,applys random colors 
     /// </summary>
     /// <param name="allGameObjects"> allGameObject to be configured </param>
-    void ConfigureGameObjects(GameObject[] allGameObjects) //TODO: have an assigned list that way colors dont get reused
+    void ConfigureGameObjects(GameObject[] allGameObjects,bool face) //TODO: have an assigned list that way colors dont get reused
     {
-        print(allGameObjects.Length);
-        //bool first = true; //we want the first one to be kinematic such that it stays in place (equivalent of grounding in fusion360)
-        Color[] faceColors = new Color[] { new Color(231, 76, 60), new Color(155, 89, 182), new Color(41, 128, 185), new Color(26, 188, 156), new Color(243, 156, 18), new Color(44, 62, 80) };
-        for (int i = 0; i<allGameObjects.Length; i++) {
-            GameObject go = allGameObjects[i];
-            var colorChange = go.GetComponent<Renderer>(); //randomizing the color attached to get easy to view multicolor faces
-            colorChange.material.SetColor("_Color", faceColors[1]);
-               // UnityEngine.Random.ColorHSV(0f, 1f, 1f, 1f, 0.5f, 1f));
+        
+        bool first = true; //we want the first one to be kinematic such that it stays in place (equivalent of grounding in fusion360)
+
+        foreach (GameObject go in allGameObjects)
+        {
+            if (!face)
+            {
+                Rigidbody rb = go.GetComponent<Rigidbody>();
+                rb.useGravity = useGravity;
+                rb.isKinematic = first;
+                rb.velocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+                if(!first)
+                    rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+                else
+                    rb.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+                
+                MeshCollider c = go.GetComponent<MeshCollider>();
+                c.convex = true;
+                c.enabled = true;
+                
+                first = false;
+            }
+            else
+            {
+                var colorChange = go.GetComponent<Renderer>(); //randomizing the color attached to get easy to view multicolor faces
+                colorChange.material.SetColor("_Color", UnityEngine.Random.ColorHSV(0f, 1f, 1f, 1f, 0.5f, 1f));
+            }
         }
     }
+    
+    Vector3 CalculateInside(GameObject[] allGameObjects)
+    {
+        float avgX = 0; float avgY = 0; float avgZ = 0;
 
+        for (int i = 0; i < parentModel.transform.childCount; i++)
+        {
+            Vector3 position = Vector3.zero;
+            Mesh mesh = allGameObjects[i].GetComponent<MeshFilter>().mesh;
+            Vector3[] localVertices = mesh.vertices;
+            Vector3[] worldVertices = new Vector3[localVertices.Length];
+
+            int k = 0;
+            foreach (Vector3 vert in localVertices)
+            {
+                worldVertices[k] = allGameObjects[i].transform.TransformPoint(vert);
+                position.x += worldVertices[k].x / localVertices.Length;
+                position.y += worldVertices[k].y / localVertices.Length;
+                position.z += worldVertices[k].z / localVertices.Length;
+                k++;
+            }
+
+             
+            avgX += position.x / parentModel.transform.childCount;
+            avgY += position.y / parentModel.transform.childCount;
+            avgZ += position.z / parentModel.transform.childCount;
+        }
+        //Calculate Middle of shape
+        Vector3 middle = new Vector3(avgX, avgY, avgZ);
+        return middle;
+    }
     /// <summary>
     /// Finds all the outside edges of a given face 2*ngon (front and back)
     /// </summary>
@@ -1120,6 +406,8 @@ public class MyScript : MonoBehaviour
             int[] triangles = mesh.GetTriangles(0);
             List<Triangle> worldTriangles = new List<Triangle>();
             int loopStop = triangles.Length;
+            if (myPolygons!=null)
+                loopStop = myPolygons[i].numTriangles * 3; //loopStop should be how many verticies are in the polygon
             for (int j = 0; j < loopStop - 2; j += 3) //all triangles in world space
             {
                 worldTriangles.Add(new Triangle(worldVertices[triangles[j]], worldVertices[triangles[j + 1]], worldVertices[triangles[j + 2]], GameObjects[i]));
@@ -1202,6 +490,43 @@ public class MyScript : MonoBehaviour
         }
         return finalizedPolygons;
     }
+    /// <summary>
+    /// Do not use
+    /// Calculates closest edge to middle out of 2 possible triangles
+    /// </summary>
+    Triangle findInsideFace(List<Triangle> triangleStructs, Vector3 inside)
+    {
+
+        double index1AvgDistance = (triangleStructs[0].edge1.vertex1 - inside).magnitude / 3;
+        double index2AvgDistance = (triangleStructs[1].edge1.vertex1 - inside).magnitude / 3;
+        index1AvgDistance += (triangleStructs[0].edge2.vertex1 - inside).magnitude / 3;
+        index2AvgDistance += (triangleStructs[1].edge2.vertex1 - inside).magnitude / 3;
+        index1AvgDistance += (triangleStructs[0].edge3.vertex1 - inside).magnitude / 3;
+        index2AvgDistance += (triangleStructs[1].edge3.vertex1 - inside).magnitude / 3;
+
+        if (index1AvgDistance > index2AvgDistance)
+        {
+            return triangleStructs[1];
+        }
+        return triangleStructs[0];
+    }
+    void CreateHingeJoints(List<Edge[]> matchingEdges)
+    {
+        //@FIXME are child objects created at this point
+
+        foreach (Edge[] entry in matchingEdges)
+        {
+
+            var hinge = entry[0].go.AddComponent<HingeJoint>();
+            GameObject go = entry[0].go;
+            hinge.anchor = entry[0].go.transform.InverseTransformPoint((entry[0].vertex1 + entry[0].vertex2) / 2);
+            hinge.axis = go.transform.InverseTransformPoint(entry[0].vertex1) - go.transform.InverseTransformPoint(entry[0].vertex2);
+            hinge.connectedBody = entry[1].go.GetComponent<Rigidbody>();
+            hinge.enableCollision = true;
+            uniqueHinges.Add(hinge);
+            Physics.IgnoreCollision(entry[0].go.GetComponent<MeshCollider>(), entry[1].go.GetComponent<MeshCollider>());
+        }
+    }
 
     /// <summary>
     /// Finds matching edges using global hingeTolerance, and finding edges that match in length. This also determines which polygons are inward facing replacing the old findInside method.
@@ -1209,7 +534,6 @@ public class MyScript : MonoBehaviour
     /// <param name="realPolygons"> List of finalized polygons </param>
     List<Edge[]> FindMatchingEdges(ref List<Polygon> realPolygons) 
     {
-        uniqueHinges = new List<MyHinge>();
         //index out of bounds on first iteration....realPolygons has bad input
         var returnList = new List<Edge[]>();
         HashSet<Polygon> insideFacePolygons = new HashSet<Polygon>(); //to avoid duplicates
@@ -1224,29 +548,11 @@ public class MyScript : MonoBehaviour
                         if ((((edge1.vertex1 - edge2.vertex1).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex2).magnitude < hingeTolerance) ||
                             ((edge1.vertex1 - edge2.vertex2).magnitude < hingeTolerance && (edge1.vertex2 - edge2.vertex1).magnitude < hingeTolerance))) 
                         {
-                            //if (Vector3.Cross(realPolygons[i].getNormal(),realPolygons[j].getNormal()).Equals(Vector3.zero)) //If vectors are parallel their cross product should be 0
-                            //    print("shared Normal"); //probably never gets called because of shared edges algorithm
+                            if (Vector3.Cross(realPolygons[i].getNormal(),realPolygons[j].getNormal()).Equals(Vector3.zero)) //If vectors are parallel their cross product should be 0
+                                print("shared Normal"); //probably never gets called because of shared edges algorithm
                             returnList.Add(new Edge[] { edge1, edge2 });
                             insideFacePolygons.Add(realPolygons[i]);
                             insideFacePolygons.Add(realPolygons[j]);
-                            Vector3 avgp1;
-                            Vector3 avgp2;
-                            if(Vector3.Distance(edge1.vertex1,edge2.vertex1) < Vector3.Distance(edge1.vertex1, edge2.vertex2))
-                            {
-                                avgp1 = (edge1.vertex1 + edge2.vertex1) / 2;
-                                avgp2 = (edge1.vertex2 + edge2.vertex2) / 2;
-                            }
-                            else
-                            {
-                                avgp1 = (edge1.vertex1 + edge2.vertex2) / 2;
-                                avgp2 = (edge1.vertex2 + edge2.vertex1) / 2;
-                            }
-                            MyHinge hinge = new MyHinge(realPolygons[i], realPolygons[j], avgp1, avgp2);
-
-                            //MyHinge hinge = new MyHinge(realPolygons[i], realPolygons[j], edge1.vertex1, edge1.vertex2);
-
-                            if (!uniqueHinges.Contains(hinge)) //slow but oh well
-                                uniqueHinges.Add(hinge);
                         }
                     }
                 }
@@ -1256,60 +562,80 @@ public class MyScript : MonoBehaviour
         realPolygons = insideFacePolygons.ToList();
         return returnList;
     }
-    void ReSizeShape(ref List<Polygon> myPolygons) // List<Edge> edges
-    {
-        Color[] faceColors = new Color[] { new Color32(231, 76, 60,255), new Color32(155, 89, 182,255), new Color32(41, 128, 185,255), new Color32(163, 228, 215, 255), new Color32(243, 156, 18,255), new Color32(20, 90, 50,255) };
-        
-        for(int i = 0; i< myPolygons.Count; i++) 
-        {
-            Polygon p = myPolygons[i];
+    /// <summary>
+    /// Creates planes, enables mesh colliders, sets them in the correct place, edits the myPolygons to refer to the collider now
+    /// </summary>
+    /// <param name="myPolygons"></param>
+     void CreateColliderPlanes(ref List<Polygon> myPolygons) // List<Edge> edges
+     {
+
+        foreach (Polygon p in myPolygons) {
             List<Vector3> verticiesList = p.getVerticies();
-            
-            int[] triangles = CreateTriangleArray(p,verticiesList).ToArray();
+            int[] triangles = CreateTriangleArray(p,ref verticiesList).ToArray();
             Vector3[] vertices = p.getVerticies().ToArray();
-            GameObject newGo = new GameObject(p.EdgeList[0].go.name, typeof(MeshFilter), typeof(MeshRenderer));
-            var oldPlace = p.EdgeList[0].go;
+            GameObject colliderGo = new GameObject("Mesh", typeof(MeshFilter),typeof(MeshCollider),typeof(MeshRenderer),typeof(Rigidbody));
+            var newChild = p.EdgeList[0].go.transform;
+
             Mesh mesh = new Mesh();
-            newGo.GetComponent<MeshFilter>().mesh = mesh;
+            colliderGo.GetComponent<MeshFilter>().mesh = mesh;
+            colliderGo.GetComponent<MeshCollider>().sharedMesh = mesh;
             mesh.vertices = vertices;
             mesh.triangles = triangles;
-            foreach (Edge e in p)
+
+            foreach(Edge e in p)
             {
-                e.go = newGo;
+                e.go = colliderGo;
             }
-            var colorChange = newGo.GetComponent<Renderer>(); 
-            colorChange.material.SetColor("_Color", faceColors[i]);
-            Destroy(oldPlace);
-            allGameObj[i] = newGo;
-
+            newChild.transform.SetParent(colliderGo.transform);//gets rid of parent
         }
-    }
+     }
 
-    List<int> CreateTriangleArray(Polygon p, List<Vector3> verticies) 
+    List<int> CreateTriangleArray(Polygon p,ref List<Vector3> verticies) //Assuming winding order does not matter for colliders -- if needed uncomment out the flipped code to make figure double sided
     {
         List<Triangle> tList = p.createTriangles();
         List<int> indexList = new List<int>();
         int indexTracker = 0;
         foreach (Triangle t in tList)
         {
-            foreach (Edge e in t)
+            foreach(Edge e in t)
             {
-                indexList.Add(verticies.IndexOf(e.vertex1));
-
+                indexList.Add(verticies.IndexOf(e.vertex1)); 
+                
                 indexTracker++;
             }
         }
+        p.numTriangles = tList.Count;
+        //Want my code to ignore everything in the list after these triangles in order to make hinges only on the plane
 
-        //double sided does not quite appear to be working properly as of yet @FIXME
+        //I want to extrude mesh outward and sqew inwards into 4 sided figure
+        Vector3 planeInterior = Vector3.zero;
+        foreach (Vector3 v in verticies)
+            planeInterior += v;
+        planeInterior /= verticies.Count; 
 
+        Vector3 shapeInterior = Vector3.zero;
+        foreach (Vector3 v in p.EdgeList[0].go.GetComponent<MeshFilter>().mesh.vertices) 
+            shapeInterior += v;
+        shapeInterior /= p.EdgeList[0].go.GetComponent<MeshFilter>().mesh.vertices.Length;
+        float extrudeDistance = .005F;
+        Vector3 extrudeDirection = (shapeInterior - planeInterior).normalized; //@FIXME I want to go in diretion of shape interior so I think I subtract
+        verticies.Add(planeInterior + extrudeDirection * extrudeDistance);
+        int extrudeVertexIndex = verticies.IndexOf(planeInterior + extrudeDirection * extrudeDistance);
+        
+        foreach(Edge e in p)
+        {
+            indexList.Add(verticies.IndexOf(e.vertex1));
+            indexList.Add(verticies.IndexOf(e.vertex2));
+            indexList.Add(extrudeVertexIndex);
+        }
+        
         int[] flipped = new int[indexList.Count];
         Array.Copy(indexList.ToArray(), flipped, indexList.Count);
-        Array.Reverse(flipped, 0, indexList.Count);
-        var combined = new int[2 * indexList.Count];
+        Array.Reverse(flipped,0,indexList.Count);
+        var combined = new int[2*indexList.Count];
         indexList.CopyTo(combined, 0);
         flipped.CopyTo(combined, indexList.Count);
-        
-        return combined.ToList<int>();
+        return indexList;
     }
 
     double CalculateVolume(List<Triangle> faces)
